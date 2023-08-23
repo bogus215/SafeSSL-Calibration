@@ -1,0 +1,7 @@
+--gpus=0
+--data=cifar100
+--server=main
+--n-label-per-class=100
+--n-valid-per-class=50 
+--mismatch-ratio=0.50
+--checkpoint-hash=2023-08-17_09-00-18

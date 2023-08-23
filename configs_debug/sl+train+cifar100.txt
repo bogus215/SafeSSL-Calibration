@@ -1,0 +1,8 @@
+--gpus=0
+--data=cifar100
+--server=main
+--n-label-per-class=100
+--n-valid-per-class=50 
+--mismatch-ratio=0.50
+--save-every=500
+--iterations=1000

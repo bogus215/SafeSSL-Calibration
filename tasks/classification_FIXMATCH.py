@@ -163,7 +163,8 @@ class Classification(Task):
 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
-                result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit, unlabel_y).detach()
+                if used_unlabeled_index.sum().item() != 0:
+                    result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
                 result['warm_up_coef'][i] = warm_up_coef
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
 
