@@ -175,21 +175,31 @@ class Classification(Task):
                         labeled_confidence = label_logit.softmax(dim=-1).max(1)[0].detach()
                         label_confidence_surgery = labeled_confidence.clone()
 
+                        unlabeled_confidence = unlabel_weak_logit.softmax(dim=-1).max(1)[0].detach()
+                        unlabel_confidence_surgery = unlabeled_confidence.clone()
+
                         for index_, (key_, value_) in enumerate(smoothing_proposed_surgery.items()):
                             if index_ != (len(smoothing_proposed_surgery)-1):
+                                mask = ((unlabel_confidence > key_) & (unlabel_confidence <= list(smoothing_proposed_surgery.keys())[index_+1]))
                                 mask_ = ((labeled_confidence > key_) & (labeled_confidence <= list(smoothing_proposed_surgery.keys())[index_+1]))
                             else:
+                                mask = ((unlabel_confidence > key_) & (unlabel_confidence <= 1))
                                 mask_ = ((labeled_confidence > key_) & (labeled_confidence <= 1))
-                                
+
                             if value_ is not None:
+                                unlabel_confidence_surgery[mask] = value_
                                 label_confidence_surgery[mask_] = value_
 
                         for_one_hot_label = nn.functional.one_hot(label_y,num_classes=self.backbone.output.out_features)
+                        for_one_hot_unlabel = nn.functional.one_hot(unlabel_pseudo_y,num_classes=self.backbone.output.out_features)
+
                         for_smoothoed_target_label = (label_confidence_surgery.view(-1,1)*(for_one_hot_label==1) + ((1-label_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_label!=1))
+                        for_smoothoed_target_unlabel = (unlabel_confidence_surgery.view(-1,1)*(for_one_hot_unlabel==1) + ((1-unlabel_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_unlabel!=1))
 
                         label_loss+= (-torch.mean(torch.sum(torch.log(label_scaled_logit.softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
                         if used_unlabeled_index.sum().item() != 0:
                             unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
+                            unlabel_loss += (-torch.mean(torch.sum(torch.log(unlabel_weak_scaled_logit[used_unlabeled_index].softmax(1)+1e-5)*for_smoothoed_target_unlabel.detach()[used_unlabeled_index],axis=1)))
                         else:
                             unlabel_loss = torch.zeros(1).to(self.local_rank)
                     else:
@@ -197,7 +207,7 @@ class Classification(Task):
                             unlabel_loss = torch.zeros(1).to(self.local_rank)
                         else:
                             unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
-                 
+                
                     warm_up_coef = consis_coef*math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
                     loss = label_loss + warm_up_coef*unlabel_loss
 

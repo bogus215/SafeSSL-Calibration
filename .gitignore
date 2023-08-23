@@ -1,0 +1,6 @@
+**/__pycache__
+wandb
+checkpoints
+**/*gz
+datasets/cifar-10*
+**/*mat
