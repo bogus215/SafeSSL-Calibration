@@ -3,6 +3,6 @@
 --server=main
 --n-label-per-class=100
 --n-valid-per-class=50 
---mismatch-ratio=0.50
+--mismatch-ratio=0.90
 --save-every=500
 --iterations=1000

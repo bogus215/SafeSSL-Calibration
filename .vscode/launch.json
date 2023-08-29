@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["@./configs_debug/calimatch+train+cifar10.txt"]
+            "args": ["@./configs_debug/sl+train+cifar10.txt"]
         }
     ]
 }
