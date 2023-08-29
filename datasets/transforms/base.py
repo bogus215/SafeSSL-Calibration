@@ -30,7 +30,7 @@ class ImageAugment(object):
     }
 
     WEAK_AUG_LIST = {
-        'cifar10':      [True, True, True, True, True, True],
+        'cifar10':      [True, True, True, True, True, False],
         'cifar100':     [True, True, True, True, True, False],
         'svhn':         [True, False, True, True, True, False],
     }

@@ -9,14 +9,17 @@ from torch.utils.data import Dataset
 # CIFAR-10
 CIFAR_MISMATCH_CONFIG = {
     'cifar10': {'target_classes': [2, 3, 4, 5, 6, 7],
-                'unlabeled_classes': {'0.00': [4, 5, 6, 7],
-                                      '0.25': [0, 5, 6, 7],
-                                      '0.50': [0, 1, 6, 7],
-                                      '0.75': [0, 1, 7, 8],
-                                      '1.00': [0, 1, 8, 9]}},
+                'unknown_classes': [0, 1, 8, 9],
+                'n_unlabeled': 20000},
+
     'cifar100': {'target_classes': list(range(0, 50)),
-                 'unlabeled_classes': {'0.50': list(range(25, 75))}}
-}
+                 'unknown_classes': list(range(50,100)),
+                 'n_unlabeled': 20000},
+
+    'tinyimagenet': {'target_classes': list(range(0, 100)),
+                     'unknown_classes': list(range(100,200)),
+                     'n_unlabeled': 40000}
+                     }
 
 def load_CIFAR(root: str,
                data_name: str,
@@ -40,11 +43,11 @@ def load_CIFAR(root: str,
     np.random.seed(random_state)
 
     target_classes = CONFIG['target_classes']
-    unlabeled_classes = CONFIG['unlabeled_classes'][mismatch_ratio]
-    nontarget_classes = list(set(range(num_classes)) - set(target_classes))
+    unknown_classes = CONFIG['unknown_classes']
+    n_unlabels = CONFIG['n_unlabeled']
 
     # load dataset
-    train_dataset = load_func(root=root, train=True, download=False)
+    train_dataset = load_func(root=root, train=True, download=True)
     train_index, validation_index = train_test_split(np.arange(len(train_dataset)),
                                                      test_size=n_valid_per_class * num_classes,
                                                      stratify=train_dataset.targets,
@@ -56,7 +59,7 @@ def load_CIFAR(root: str,
     train_dataset = {'images': np.array(train_dataset.data)[train_index],
                      'labels': np.array(train_dataset.targets)[train_index]}
 
-    test_dataset = load_func(root=root, train=False, download=False)
+    test_dataset = load_func(root=root, train=False, download=True)
     test_dataset = {'images': np.array(test_dataset.data),
                     'labels': np.array(test_dataset.targets)}
 
@@ -68,17 +71,23 @@ def load_CIFAR(root: str,
     l_train_images, l_train_labels = [], []
     u_train_images, u_train_labels = [], []
 
-    # target classes: labeled data
+    # target classes: labeled data, partial unlabeled data
+    n_unlabels_per_cls = int(n_unlabels*(1.0-mismatch_ratio)) // len(target_classes)
     for c in target_classes:
         # train
         l_train_images.extend(train_images[train_labels == c][:n_label_per_class])
         l_train_labels.extend(train_labels[train_labels == c][:n_label_per_class])
 
-    # unlabel - doesnt matter whether target or not
-    for c in unlabeled_classes:
         # unlabel train
-        u_train_images.extend(train_images[train_labels == c][n_label_per_class:])
-        u_train_labels.extend(train_labels[train_labels == c][n_label_per_class:])
+        u_train_images.extend(train_images[train_labels == c][n_label_per_class:n_label_per_class+n_unlabels_per_cls])
+        u_train_labels.extend(train_labels[train_labels == c][n_label_per_class:n_label_per_class+n_unlabels_per_cls])
+
+    # unknown_classes: partial unlabeled data
+    n_unlabels_shifts = (n_unlabels - n_unlabels_per_cls*len(target_classes)) // len(unknown_classes)
+    for c in unknown_classes:
+        # unlabel train
+        u_train_images.extend(train_images[train_labels == c][:n_unlabels_shifts])
+        u_train_labels.extend(train_labels[train_labels == c][:n_unlabels_shifts])
 
     # to array
     l_train_images, l_train_labels = np.array(l_train_images), np.array(l_train_labels)
@@ -107,7 +116,7 @@ def load_CIFAR(root: str,
 
     # convert to 0 ~ target_classes
     convert_target = dict([(k, i) for i, k in enumerate(target_classes)])
-    convert_nontarget = dict([(k, i + len(target_classes)) for i, k in enumerate(nontarget_classes)])
+    convert_nontarget = dict([(k, i + len(target_classes)) for i, k in enumerate(unknown_classes)])
 
     convert_dict = convert_target.copy()
     convert_dict.update(convert_nontarget)

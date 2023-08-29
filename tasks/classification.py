@@ -7,6 +7,9 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from tsnecuda import TSNE
+import matplotlib.pyplot as plt
+plt.style.use('bmh')
 
 from tasks.base import Task
 from utils import RandomSampler, TopKAccuracy
@@ -86,6 +89,7 @@ class Classification(Task):
             train_set,
             eval_set,
             test_set,
+            open_test_set,
             save_every,
             n_bins,
             **kwargs):  # pylint: disable=unused-argument
@@ -104,12 +108,10 @@ class Classification(Task):
         train_l_iterator = iter(train_l_loader)
         
         ## unlabeled
-        sampler = RandomSampler(len(train_set[1]), self.iterations * self.batch_size // 2)
-        train_u_loader = DataLoader(train_set[1],batch_size=batch_size//2,sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
-        train_u_iterator = iter(train_u_loader)
-        
+        unlabel_loader = DataLoader(train_set[1],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
+        open_test_loader = DataLoader(open_test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         # Logging
         logger = kwargs.get('logger', None)
@@ -119,11 +121,16 @@ class Classification(Task):
         best_epoch    = 0
 
         epochs = self.iterations // save_every
+        self.trained_iteration = 0
+
         for epoch in range(1, epochs + 1):
 
             # Train & evaluate
-            train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every)
+            train_history, train_l_iterator = self.train(train_l_iterator, iteration=save_every, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
+            if self.ckpt_dir.split("/")[2]=='cifar10':
+                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel")
+                self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
 
             epoch_history = collections.defaultdict(dict)
             for k, v1 in train_history.items():
@@ -170,13 +177,14 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
         
-    def train(self, label_iterator, unlabel_iterator, iteration):
+    def train(self, label_iterator, iteration, n_bins):
         """Training defined for a single epoch."""
 
         self._set_learning_phase(train=True)
         result = {
             'loss': torch.zeros(iteration, device=self.local_rank),
             'top@1': torch.zeros(iteration, device=self.local_rank),
+            'ece': torch.zeros(iteration, device=self.local_rank),
         }
         
         with Progress(transient=True, auto_refresh=False) as pg:
@@ -187,7 +195,6 @@ class Classification(Task):
             for i in range(iteration):
                 with torch.cuda.amp.autocast(self.mixed_precision):
                     l_batch = next(label_iterator)
-                    u_batch = next(unlabel_iterator)
 
                     x = l_batch['x'].to(self.local_rank)
                     y = l_batch['y'].to(self.local_rank)
@@ -202,9 +209,11 @@ class Classification(Task):
                     loss.backward()
                     self.optimizer.step()
                 self.optimizer.zero_grad()
+                self.trained_iteration+=1
 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(logits, y).detach()
+                result['ece'][i] = self.get_ece(preds=logits.softmax(dim=1).detach().cpu().numpy(), targets=y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
 
                 if self.local_rank == 0:
                     desc = f"[bold green] [{i+1}/{iteration}]: "
@@ -217,7 +226,7 @@ class Classification(Task):
                 if self.scheduler is not None:
                     self.scheduler.step()
 
-        return {k: v.mean().item() for k, v in result.items()}, label_iterator, unlabel_iterator
+        return {k: v.mean().item() for k, v in result.items()}, label_iterator
 
     @torch.no_grad()
     def evaluate(self, data_loader, n_bins):
@@ -268,6 +277,10 @@ class Classification(Task):
     def predict(self, x: torch.FloatTensor):
         """Make a prediction provided a batch of samples."""
         return self.backbone(x)
+
+    def get_feature(self, x: torch.FloatTensor):
+        """Make a prediction provided a batch of samples."""
+        return self.backbone(x, True)
 
     def _set_learning_phase(self, train=False):
         if train:
@@ -332,3 +345,79 @@ class Classification(Task):
                 y_ticks_second_ticks.append(None)
 
         return ece, {tick:accuracy for tick, accuracy in zip(bin_boundaries.round(2)[:-1], acc_ticks)}
+    
+    @torch.no_grad()
+    def log_plot_history(self, data_loader, time, name):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Plotting...", total=steps)
+
+            pred,true,IDX,FEATURE=[],[],[],[]
+            for i, batch in enumerate(data_loader):
+
+                x = batch['x'].to(self.local_rank)
+                y = batch['y'].to(self.local_rank)
+                idx = batch['idx'].to(self.local_rank)
+
+                logits, feature = self.get_feature(x)
+                true.append(y.cpu())
+                pred.append(logits.cpu())
+                FEATURE.append(feature.squeeze().cpu())
+                IDX += [idx]
+                
+                if self.local_rank == 0:
+                    desc = f"[bold green] [{i+1}/{steps}]: Having feature vector..."
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        # preds, pred are logit vectors
+        preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
+        FEATURE = torch.cat(FEATURE)
+        snd_feature = TSNE().fit_transform(FEATURE)
+        colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple']
+
+        plt.figure(figsize=(12, 12))
+        plt.subplot(2, 2, 1)
+        for c in trues.unique()[:preds.shape[1]]:
+            plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
+        plt.legend()
+        plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+        plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+        plt.title('Via true labels - IN')
+
+        plt.subplot(2, 2, 2)
+        for c in trues.unique()[preds.shape[1]:]:
+            plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
+        plt.legend()
+        plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+        plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+        plt.title('Via true labels - OOD')
+
+        plt.subplot(2, 2, 3)
+        for idx,c in enumerate(range(preds.shape[1])):
+            plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
+                        snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
+                        label=c,c=colors[idx])
+        plt.legend()
+        plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+        plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+        plt.title('Via prediction - IN')
+
+        plt.subplot(2, 2, 4)
+        for idx,c in enumerate(range(preds.shape[1])):
+            plt.scatter(snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),0],
+                        snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),1],
+                        label=c,c=colors[idx])
+        plt.legend()
+        plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+        plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+        plt.title('Via prediction - OOD')
+
+        plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}.png"))
+        plt.close('all')

@@ -113,7 +113,7 @@ class ConfigBase(object):
         parser = argparse.ArgumentParser("Data", add_help=False)
         parser.add_argument('--root', type=str, default='./datasets')
         parser.add_argument('--data', type=str, default='cifar10', choices=('cifar10', 'cifar100', 'tiny','svhn'))
-        parser.add_argument('--mismatch-ratio', type=str, default='0.00', choices=('0.00', '0.25', '0.50', '0.75', '1.00'))
+        parser.add_argument('--mismatch-ratio', type=float, default=0.30)
         parser.add_argument('--n-label-per-class', type=int, default=400)
         parser.add_argument('--n-valid-per-class', type=int, default=500)
         parser.add_argument('--input-size', type=int, default=32, choices=(32, 64, 96, 224))
@@ -128,7 +128,7 @@ class ConfigBase(object):
     def model_parser() -> argparse.ArgumentParser:
         """Returns an `argparse.ArgumentParser` instance containing model-related arguments."""
         parser = argparse.ArgumentParser("CNN Backbone", add_help=False)
-        parser.add_argument('--backbone-type', type=str, default='wide28_2', choices=('wide28_10', 'wide28_10' ,'densenet121', "vgg16_bn", "inceptionv4"))
+        parser.add_argument('--backbone-type', type=str, default='wide28_2', choices=('wide28_2', 'wide28_10' ,'densenet121', "vgg16_bn", "inceptionv4"))
         parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint file to resume training from.')
         return parser
 
@@ -143,7 +143,7 @@ class ConfigBase(object):
         parser.add_argument('--optimizer', type=str, default='adam', choices=('sgd', 'adam',), help='Optimization algorithm.')
         parser.add_argument('--learning-rate', type=float, default=0.003, help='Base learning rate to start from.')
         parser.add_argument('--mixed-precision', action='store_true', help='Use float16 precision.')
-        parser.add_argument('--milestones', action="store", type=int , nargs='*',default=[400000], help='learning rate decay milestones')
+        parser.add_argument('--milestones', action="store", type=int , nargs='*',default=[150000,300000,400000], help='learning rate decay milestones')
         parser.add_argument('--gamma', type=float , default=.2, help='learning rate decay gamma')
         parser.add_argument('--weight-decay', type=float , default=0, help='l2 weight decay')
 

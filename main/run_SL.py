@@ -76,6 +76,7 @@ def main_worker(local_rank: int, config: object):
         unlabeled_set = CIFAR(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
         eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
+        open_test_set = CIFAR(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
     else:
         raise NotImplementedError
 
@@ -120,6 +121,7 @@ def main_worker(local_rank: int, config: object):
         train_set=[labeled_set,unlabeled_set],
         eval_set=eval_set,
         test_set=test_set,
+        open_test_set=open_test_set,
         save_every=config.save_every,
         n_bins=config.n_bins,
         logger=logger
