@@ -204,3 +204,29 @@ class CIFAR_WEAK_AND_RAW(Dataset):
 
     def __len__(self):
         return len(self.targets)
+    
+class CIFAR_K_AUG(Dataset):
+    def __init__(self,
+                 data_name: str,
+                 dataset: dict,
+                 transform: object = None,
+                 **kwargs):
+
+        self.data_name = data_name
+        self.data = dataset['images']
+        self.targets = dataset['labels']
+        self.transform = transform
+        self.K = kwargs.get("K",2)
+
+    def __getitem__(self, idx):
+        img, target = self.data[idx], self.targets[idx]
+        if self.transform is not None:
+            weak_img = self.transform(img)
+            data = dict(weak_img=weak_img, y=target, idx=idx)
+            K_data = dict([(f"weak_img_{i+1}",self.transform(img)) for i in range(1,self.K)])
+            data.update(K_data)
+
+        return data
+
+    def __len__(self):
+        return len(self.targets)

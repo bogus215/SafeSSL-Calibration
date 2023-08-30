@@ -256,9 +256,9 @@ class VATConfig(ConfigBase):
     def task(self) -> str:
         return "VAT"
 
-class MeanTeacherConfig(ConfigBase):
+class MixMatchConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
-        super(MeanTeacherConfig, self).__init__(args, **kwargs)
+        super(MixMatchConfig, self).__init__(args, **kwargs)
 
     @staticmethod
     def task_specific_parser() -> argparse.ArgumentParser:
@@ -274,7 +274,7 @@ class MeanTeacherConfig(ConfigBase):
 
     @property
     def task(self) -> str:
-        return "MeanTeacher"
+        return "MixMatch"
 
 class TestingSLConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
