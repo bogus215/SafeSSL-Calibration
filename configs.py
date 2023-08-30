@@ -203,6 +203,7 @@ class CaliMATCHConfig(ConfigBase):
         parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--tau', type=float, default=0.95)
         parser.add_argument('--consis-coef', type=float, default=1)
+        parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
 
         return parser
 

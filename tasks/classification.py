@@ -386,42 +386,65 @@ class Classification(Task):
         snd_feature = TSNE().fit_transform(FEATURE)
         colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple']
 
-        plt.figure(figsize=(12, 12))
-        plt.subplot(2, 2, 1)
-        for c in trues.unique()[:preds.shape[1]]:
-            plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
-        plt.legend()
-        plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-        plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-        plt.title('Via true labels - IN')
+        if len(trues.unique()) != preds.shape[1]:
+            plt.figure(figsize=(12, 12))
+            plt.subplot(2, 2, 1)
+            for c in trues.unique()[:preds.shape[1]]:
+                plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
+            plt.legend()
+            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+            plt.title('Via true labels - IN')
 
-        plt.subplot(2, 2, 2)
-        for c in trues.unique()[preds.shape[1]:]:
-            plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
-        plt.legend()
-        plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-        plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-        plt.title('Via true labels - OOD')
+            plt.subplot(2, 2, 2)
+            for c in trues.unique()[preds.shape[1]:]:
+                plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
+            plt.legend()
+            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+            plt.title('Via true labels - OOD')
 
-        plt.subplot(2, 2, 3)
-        for idx,c in enumerate(range(preds.shape[1])):
-            plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
-                        snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
-                        label=c,c=colors[idx])
-        plt.legend()
-        plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-        plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-        plt.title('Via prediction - IN')
+            plt.subplot(2, 2, 3)
+            for idx,c in enumerate(range(preds.shape[1])):
+                plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
+                            snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
+                            label=c,c=colors[idx])
+            plt.legend()
+            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+            plt.title('Via prediction - IN')
 
-        plt.subplot(2, 2, 4)
-        for idx,c in enumerate(range(preds.shape[1])):
-            plt.scatter(snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),0],
-                        snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),1],
-                        label=c,c=colors[idx])
-        plt.legend()
-        plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-        plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-        plt.title('Via prediction - OOD')
+            plt.subplot(2, 2, 4)
+            for idx,c in enumerate(range(preds.shape[1])):
+                plt.scatter(snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),0],
+                            snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),1],
+                            label=c,c=colors[idx])
+            plt.legend()
+            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+            plt.title('Via prediction - OOD')
 
-        plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}.png"))
-        plt.close('all')
+            plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}.png"))
+            plt.close('all')
+        else:
+            plt.figure(figsize=(12, 6))
+            plt.subplot(1, 2, 1)
+            for c in trues.unique()[:preds.shape[1]]:
+                plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
+            plt.legend()
+            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+            plt.title('Via true labels - IN')
+
+            plt.subplot(1, 2, 2)
+            for idx,c in enumerate(range(preds.shape[1])):
+                plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
+                            snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
+                            label=c,c=colors[idx])
+            plt.legend()
+            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+            plt.title('Via prediction - IN')
+
+            plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}.png"))
+            plt.close('all')

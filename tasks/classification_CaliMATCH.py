@@ -21,11 +21,13 @@ class Classification(Task):
             train_set,
             eval_set,
             test_set,
+            open_test_set,
             save_every,
             tau,
             consis_coef,
             warm_up_end,
             n_bins: int = 15,
+            train_n_bins: int = 30,
             **kwargs):  # pylint: disable=unused-argument
 
         batch_size = self.batch_size
@@ -46,8 +48,10 @@ class Classification(Task):
         train_u_loader = DataLoader(train_set[1],batch_size=batch_size//2,sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
         train_u_iterator = iter(train_u_loader)
         
+        unlabel_loader = DataLoader(train_set[1],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
+        open_test_loader = DataLoader(open_test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         # Logging
         logger = kwargs.get('logger', None)
@@ -63,8 +67,11 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Train & evaluate
-            train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, smoothing_proposed=None if epoch==1 else ece_results)
-            eval_history, ece_results = self.evaluate(eval_loader, n_bins)
+            train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, smoothing_proposed=None if epoch==1 else ece_results, n_bins=n_bins)
+            eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
+            if self.ckpt_dir.split("/")[2]=='cifar10':
+                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel")
+                self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
 
             epoch_history = collections.defaultdict(dict)
             for k, v1 in train_history.items():
@@ -93,7 +100,7 @@ class Classification(Task):
                     ckpt = os.path.join(self.ckpt_dir, "ckpt.best.pth.tar")
                     self.save_checkpoint(ckpt, epoch=epoch)
 
-                test_history = self.evaluate(test_loader, n_bins)
+                test_history = self.evaluate(test_loader, n_bins=n_bins, train_n_bins=train_n_bins)
                 for k, v1 in test_history[0].items():
                     epoch_history[k]['test'] = v1
 
@@ -110,17 +117,20 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_iterator, unlabel_iterator, iteration, tau, consis_coef, smoothing_proposed):
+    def train(self, label_iterator, unlabel_iterator, iteration, tau, consis_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         self._set_learning_phase(train=True)
         result = {
             'loss': torch.zeros(iteration, device=self.local_rank),
             'top@1': torch.zeros(iteration, device=self.local_rank),
+            'ece': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
+            'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'warm_up_coef': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
-            "Temperature": torch.zeros(iteration, device=self.local_rank)
+            "Temperature": torch.zeros(iteration, device=self.local_rank),
+            'cali_loss': torch.zeros(iteration, device=self.local_rank)
         }
         
         with Progress(transient=True, auto_refresh=False) as pg:
@@ -175,38 +185,25 @@ class Classification(Task):
                         labeled_confidence = label_logit.softmax(dim=-1).max(1)[0].detach()
                         label_confidence_surgery = labeled_confidence.clone()
 
-                        unlabeled_confidence = unlabel_weak_logit.softmax(dim=-1).max(1)[0].detach()
-                        unlabel_confidence_surgery = unlabeled_confidence.clone()
-
                         for index_, (key_, value_) in enumerate(smoothing_proposed_surgery.items()):
                             if index_ != (len(smoothing_proposed_surgery)-1):
-                                mask = ((unlabel_confidence > key_) & (unlabel_confidence <= list(smoothing_proposed_surgery.keys())[index_+1]))
                                 mask_ = ((labeled_confidence > key_) & (labeled_confidence <= list(smoothing_proposed_surgery.keys())[index_+1]))
                             else:
-                                mask = ((unlabel_confidence > key_) & (unlabel_confidence <= 1))
                                 mask_ = ((labeled_confidence > key_) & (labeled_confidence <= 1))
 
                             if value_ is not None:
-                                unlabel_confidence_surgery[mask] = value_
                                 label_confidence_surgery[mask_] = value_
 
                         for_one_hot_label = nn.functional.one_hot(label_y,num_classes=self.backbone.output.out_features)
-                        for_one_hot_unlabel = nn.functional.one_hot(unlabel_pseudo_y,num_classes=self.backbone.output.out_features)
-
                         for_smoothoed_target_label = (label_confidence_surgery.view(-1,1)*(for_one_hot_label==1) + ((1-label_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_label!=1))
-                        for_smoothoed_target_unlabel = (unlabel_confidence_surgery.view(-1,1)*(for_one_hot_unlabel==1) + ((1-unlabel_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_unlabel!=1))
 
-                        label_loss+= (-torch.mean(torch.sum(torch.log(label_scaled_logit.softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
-                        if used_unlabeled_index.sum().item() != 0:
-                            unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
-                            unlabel_loss += (-torch.mean(torch.sum(torch.log(unlabel_weak_scaled_logit[used_unlabeled_index].softmax(1)+1e-5)*for_smoothoed_target_unlabel.detach()[used_unlabeled_index],axis=1)))
-                        else:
-                            unlabel_loss = torch.zeros(1).to(self.local_rank)
+                        cali_loss = (-torch.mean(torch.sum(torch.log(label_scaled_logit.softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
+                        label_loss += cali_loss
+                    
+                    if used_unlabeled_index.sum().item() != 0:
+                        unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                     else:
-                        if used_unlabeled_index.sum().item() == 0:
-                            unlabel_loss = torch.zeros(1).to(self.local_rank)
-                        else:
-                            unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
+                        unlabel_loss = torch.zeros(1).to(self.local_rank)
                 
                     warm_up_coef = consis_coef*math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
                     loss = label_loss + warm_up_coef*unlabel_loss
@@ -224,8 +221,13 @@ class Classification(Task):
 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
+                result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                if smoothing_proposed is not None:
+                    result['cali_loss'][i] = cali_loss.detach()
                 if used_unlabeled_index.sum().item() != 0:
                     result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
+                    result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
+                                                              targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                 result['warm_up_coef'][i] = warm_up_coef
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
                 result["Temperature"][i] = self.backbone.temperature.item()
@@ -244,7 +246,7 @@ class Classification(Task):
         return {k: v.mean().item() for k, v in result.items()}, label_iterator, unlabel_iterator
 
     @torch.no_grad()
-    def evaluate(self, data_loader, n_bins):
+    def evaluate(self, data_loader, n_bins, train_n_bins):
         """Evaluation defined for a single epoch."""
 
         steps = len(data_loader)
@@ -287,8 +289,10 @@ class Classification(Task):
 
         ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=n_bins, plot=False)
         result['ece'][0] = ece_results[0]
+
+        train_ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
         
-        return {k: v.mean().item() for k, v in result.items()}, ece_results[1]
+        return {k: v.mean().item() for k, v in result.items()}, train_ece_results[1]
 
     @staticmethod
     def get_ece(preds: np.array, targets: np.array, n_bins: int=15, **kwargs):
