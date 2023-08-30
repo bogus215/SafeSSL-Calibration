@@ -20,6 +20,7 @@ class Classification(Task):
             train_set,
             eval_set,
             test_set,
+            open_test_set,
             save_every,
             tau,
             consis_coef,
@@ -45,8 +46,10 @@ class Classification(Task):
         train_u_loader = DataLoader(train_set[1],batch_size=batch_size//2,sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
         train_u_iterator = iter(train_u_loader)
         
+        unlabel_loader = DataLoader(train_set[1],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
+        open_test_loader = DataLoader(open_test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         # Logging
         logger = kwargs.get('logger', None)
@@ -62,8 +65,11 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Train & evaluate
-            train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef)
+            train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
+            if self.ckpt_dir.split("/")[2]=='cifar10':
+                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel")
+                self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
 
             epoch_history = collections.defaultdict(dict)
             for k, v1 in train_history.items():
@@ -109,14 +115,16 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_iterator, unlabel_iterator, iteration, tau, consis_coef):
+    def train(self, label_iterator, unlabel_iterator, iteration, tau, consis_coef, n_bins):
         """Training defined for a single epoch."""
 
         self._set_learning_phase(train=True)
         result = {
             'loss': torch.zeros(iteration, device=self.local_rank),
             'top@1': torch.zeros(iteration, device=self.local_rank),
+            'ece': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
+            'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'warm_up_coef': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank)
         }
@@ -163,8 +171,11 @@ class Classification(Task):
 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
+                result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 if used_unlabeled_index.sum().item() != 0:
                     result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
+                    result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
+                                                              targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                 result['warm_up_coef'][i] = warm_up_coef
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
 

@@ -14,7 +14,7 @@ plt.style.use('bmh')
 from tasks.base import Task
 from utils import RandomSampler, TopKAccuracy
 from utils.logging import make_epoch_description
-from utils.optimization import get_multi_step_scheduler, get_optimizer
+from utils.optimization import get_cosine_anneal_scheduler, get_optimizer
 
 
 class Classification(Task):
@@ -70,7 +70,7 @@ class Classification(Task):
             lr=learning_rate,
             weight_decay=weight_decay
         )
-        self.scheduler = get_multi_step_scheduler(
+        self.scheduler = get_cosine_anneal_scheduler(
             optimizer = self.optimizer,
             milestones = self.milestones,
             gamma= self.gamma
@@ -109,6 +109,7 @@ class Classification(Task):
         
         ## unlabeled
         unlabel_loader = DataLoader(train_set[1],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
+
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
         open_test_loader = DataLoader(open_test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
@@ -361,7 +362,10 @@ class Classification(Task):
             pred,true,IDX,FEATURE=[],[],[],[]
             for i, batch in enumerate(data_loader):
 
-                x = batch['x'].to(self.local_rank)
+                try:
+                    x = batch['x'].to(self.local_rank)
+                except:
+                    x = batch['weak_img'].to(self.local_rank)
                 y = batch['y'].to(self.local_rank)
                 idx = batch['idx'].to(self.local_rank)
 

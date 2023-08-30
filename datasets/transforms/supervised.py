@@ -25,7 +25,7 @@ class SemiAugment(ImageAugment):
         transform = [
             transforms.ToPILImage(),
             transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(size=self.size, padding=4),
+            transforms.RandomCrop(size=self.size, padding=4, padding_mode='reflect'),
             transforms.ToTensor(),
             transforms.Normalize(self.mean, self.std),
             GaussianNoise()
@@ -39,6 +39,8 @@ class SemiAugment(ImageAugment):
 
         transform = [
             transforms.ToPILImage(),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(size=self.size, padding=4, padding_mode='reflect'),
             RandAugmentMC(n=2, m=10),
             transforms.ToTensor(),
             transforms.Normalize(self.mean, self.std),
