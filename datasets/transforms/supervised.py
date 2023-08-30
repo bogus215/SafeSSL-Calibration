@@ -16,6 +16,7 @@ class SemiAugment(ImageAugment):
         if self.impl == 'torchvision':
             self.transform = self.with_torchvision()
             self.strong_transform = self.with_strong_torchvision()
+            self.raw_transform = self.with_raw_torchvision()
             
         elif self.impl == 'albumentations':
             raise NotImplementedError()
@@ -48,6 +49,16 @@ class SemiAugment(ImageAugment):
 
         return transforms.Compose(transform)
 
+    def with_raw_torchvision(self):
+
+        transform = [
+            transforms.ToPILImage(),
+            transforms.ToTensor(),
+            transforms.Normalize(self.mean, self.std),
+        ]
+
+        return transforms.Compose(transform)
+    
 class TestAugment(ImageAugment):
     def __init__(self,
                  size: int or tuple = (224, 224),

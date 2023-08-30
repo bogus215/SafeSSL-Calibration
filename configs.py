@@ -218,7 +218,64 @@ class CaliMATCHPlusConfig(CaliMATCHConfig):
     @property
     def task(self) -> str:
         return "CaliMATCH+"
-    
+
+class PseudoLabelConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(PseudoLabelConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--consis-coef', type=float, default=1)
+        parser.add_argument('--threshold', type=float, default=0.95)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "PseudoLabel"
+
+class VATConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(VATConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--consis-coef', type=float, default=0.3)
+        parser.add_argument('--xi', type=float, default=1e-6)
+        parser.add_argument('--eps', type=float, default=6)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "VAT"
+
+class MeanTeacherConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(MeanTeacherConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--consis-coef', type=float, default=100)
+        parser.add_argument('--alpha', type=float, default=.75)
+        parser.add_argument('--T', type=float, default=0.5)
+        parser.add_argument('--K', type=int, default=2)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "MeanTeacher"
+
 class TestingSLConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
         super(TestingSLConfig, self).__init__(args, **kwargs)

@@ -181,3 +181,26 @@ class CIFAR_STRONG(Dataset):
 
     def __len__(self):
         return len(self.targets)
+    
+class CIFAR_WEAK_AND_RAW(Dataset):
+    def __init__(self,
+                 data_name: str,
+                 dataset: dict,
+                 transform: object = None,
+                 **kwargs):
+
+        self.data_name = data_name
+        self.data = dataset['images']
+        self.targets = dataset['labels']
+        self.transform = transform
+
+    def __getitem__(self, idx):
+        img, target = self.data[idx], self.targets[idx]
+        if self.transform is not None:
+            weak_img = self.transform(img)
+            raw_img = self.transform.raw_transform(img)
+
+        return dict(weak_img=weak_img, raw_img=raw_img, y=target, idx=idx)
+
+    def __len__(self):
+        return len(self.targets)
