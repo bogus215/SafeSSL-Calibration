@@ -7,7 +7,7 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from tsnecuda import TSNE
+from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 plt.style.use('bmh')
 
