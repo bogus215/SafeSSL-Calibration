@@ -14,7 +14,7 @@ plt.style.use('bmh')
 from tasks.base import Task
 from utils import RandomSampler, TopKAccuracy
 from utils.logging import make_epoch_description
-from utils.optimization import get_cosine_anneal_scheduler, get_optimizer
+from utils.optimization import get_optimizer, get_multi_step_scheduler
 
 
 class Classification(Task):
@@ -70,7 +70,7 @@ class Classification(Task):
             lr=learning_rate,
             weight_decay=weight_decay
         )
-        self.scheduler = get_cosine_anneal_scheduler(
+        self.scheduler = get_multi_step_scheduler(
             optimizer = self.optimizer,
             milestones = self.milestones,
             gamma= self.gamma

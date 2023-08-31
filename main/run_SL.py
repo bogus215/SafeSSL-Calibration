@@ -62,24 +62,8 @@ def main_worker(local_rank: int, config: object):
         model = inceptionv4(class_nums=num_classes)
     else:
         raise NotImplementedError
-    
-    # Data (transforms & datasets)
-    trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
-    train_trans = AUGMENTS[config.train_augment](**trans_kwargs)
-    test_trans = AUGMENTS[config.test_augment](**trans_kwargs)
 
-    if config.data in ['cifar10', 'cifar100']:
-
-        datasets, _ = load_CIFAR(root=config.root,data_name=config.data,n_valid_per_class=config.n_valid_per_class,seed=config.seed, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio)
-
-        labeled_set = CIFAR(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
-        unlabeled_set = CIFAR(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
-        eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
-        test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
-        open_test_set = CIFAR(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
-    else:
-        raise NotImplementedError
-
+    # create logger
     if local_rank == 0:
         logfile = os.path.join(config.checkpoint_dir, 'main.log')
         logger = get_rich_logger(logfile=logfile)
@@ -91,6 +75,23 @@ def main_worker(local_rank: int, config: object):
             )
     else:
         logger = None
+
+    # Data (transforms & datasets)
+    trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
+    train_trans = AUGMENTS[config.train_augment](**trans_kwargs)
+    test_trans = AUGMENTS[config.test_augment](**trans_kwargs)
+
+    if config.data in ['cifar10', 'cifar100']:
+
+        datasets, _ = load_CIFAR(root=config.root,data_name=config.data,n_valid_per_class=config.n_valid_per_class,seed=config.seed, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio, logger=logger)
+
+        labeled_set = CIFAR(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
+        unlabeled_set = CIFAR(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
+        eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
+        test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
+        open_test_set = CIFAR(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
+    else:
+        raise NotImplementedError
 
     if local_rank == 0:
         logger.info(f'Data: {config.data}')

@@ -26,6 +26,7 @@ def load_CIFAR(root: str,
                n_label_per_class: int,
                n_valid_per_class: int,
                mismatch_ratio,
+               logger,
                **kwargs):
 
     # data setting
@@ -100,7 +101,7 @@ def load_CIFAR(root: str,
     # check OOD ratio
     n_in = np.isin(u_train_dataset['labels'], target_classes).sum()
     n_ood = len(u_train_dataset['labels']) - n_in
-    print(f'[Mismatch={mismatch_ratio}] In: {n_in} vs. OOD : {n_ood}')
+    logger.info(f'[Mismatch={mismatch_ratio}] In: {n_in} vs. OOD : {n_ood}')
 
     # 2. validation: only target classes
     target_indices = np.isin(validation_dataset['labels'], target_classes)

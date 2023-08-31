@@ -140,12 +140,12 @@ class ConfigBase(object):
         parser.add_argument('--warm-up', type=int, default=200000, help='Number of training epochs.')
         parser.add_argument('--batch-size', type=int, default=100, help='Mini-batch size.')
         parser.add_argument('--num-workers', type=int, default=8, help='Number of CPU threads.')
-        parser.add_argument('--optimizer', type=str, default='sgd', choices=('sgd', 'adam',), help='Optimization algorithm.')
-        parser.add_argument('--learning-rate', type=float, default=0.03, help='Base learning rate to start from.')
+        parser.add_argument('--optimizer', type=str, default='adam', choices=('sgd', 'adam',), help='Optimization algorithm.')
+        parser.add_argument('--learning-rate', type=float, default=3e-3, help='Base learning rate to start from.')
         parser.add_argument('--mixed-precision', action='store_true', help='Use float16 precision.')
-        parser.add_argument('--milestones', type=int , default=100000, help='learning rate decay milestones in cosine annealing.')
+        parser.add_argument('--milestones', action="store", type=int , nargs='*',default=[400000], help='learning rate decay milestones')
         parser.add_argument('--gamma', type=float , default=.2, help='learning rate decay gamma')
-        parser.add_argument('--weight-decay', type=float , default=5e-4, help='l2 weight decay')
+        parser.add_argument('--weight-decay', type=float , default=0, help='l2 weight decay')
 
         return parser
 
