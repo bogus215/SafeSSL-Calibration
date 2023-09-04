@@ -125,6 +125,7 @@ def main_worker(local_rank: int, config: object):
         open_test_set=open_test_set,
         save_every=config.save_every,
         n_bins=config.n_bins,
+        enable_plot=config.enable_plot,
         logger=logger
     )
     elapsed_sec = time.time() - start
