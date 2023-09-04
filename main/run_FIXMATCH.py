@@ -128,6 +128,7 @@ def main_worker(local_rank: int, config: object):
         consis_coef=config.consis_coef,
         warm_up_end=config.warm_up,
         n_bins=config.n_bins,
+        enable_plot=config.enable_plot,
         logger=logger
     )
     elapsed_sec = time.time() - start

@@ -156,6 +156,8 @@ class ConfigBase(object):
         parser.add_argument('--checkpoint-root', type=str, default='./checkpoints/', help='Top-level directory of checkpoints.')
         parser.add_argument('--save-every', type=int, default=10000, help='Save model checkpoint every `save_every` epochs.')
         parser.add_argument('--enable-wandb', action='store_true', help='Use Weights & Biases plugin.')
+        parser.add_argument('--enable-plot', action='store_true', help='Plotting unlabeled and testing dataset - TSNE.')
+
         return parser
 
 class SLConfig(ConfigBase):

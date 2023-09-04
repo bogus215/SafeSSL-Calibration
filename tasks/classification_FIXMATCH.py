@@ -53,6 +53,7 @@ class Classification(Task):
 
         # Logging
         logger = kwargs.get('logger', None)
+        enable_plot = kwargs.get('enable_plot',False)
 
         # Supervised training
         best_eval_acc = -float('inf')
@@ -67,7 +68,7 @@ class Classification(Task):
             # Train & evaluate
             train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
-            if self.ckpt_dir.split("/")[2]=='cifar10':
+            if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
                 self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel")
                 self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
 
