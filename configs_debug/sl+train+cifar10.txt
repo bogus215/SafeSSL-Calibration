@@ -6,3 +6,4 @@
 --mismatch-ratio=0.00
 --save-every=500
 --iterations=1000
+--enable-plot
