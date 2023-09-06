@@ -48,6 +48,7 @@ class Classification(Task):
         train_u_loader = DataLoader(train_set[1],batch_size=batch_size//2,sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
         train_u_iterator = iter(train_u_loader)
         
+        label_loader = DataLoader(train_set[0],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         unlabel_loader = DataLoader(train_set[1],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
@@ -55,6 +56,7 @@ class Classification(Task):
 
         # Logging
         logger = kwargs.get('logger', None)
+        enable_plot = kwargs.get('enable_plot',False)
 
         # Supervised training
         best_eval_acc = -float('inf')
@@ -69,8 +71,9 @@ class Classification(Task):
             # Train & evaluate
             train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, smoothing_proposed=None if epoch==1 else ece_results, n_bins=n_bins)
             eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
-            if self.ckpt_dir.split("/")[2]=='cifar10':
-                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel")
+            if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
+                label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
+                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
                 self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
 
             epoch_history = collections.defaultdict(dict)

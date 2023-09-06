@@ -7,7 +7,7 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from sklearn.manifold import TSNE
+from tsnecuda import TSNE
 import matplotlib.pyplot as plt
 plt.style.use('bmh')
 
@@ -349,11 +349,14 @@ class Classification(Task):
         return ece, {tick:accuracy for tick, accuracy in zip(bin_boundaries.round(2)[:-1], acc_ticks)}
     
     @torch.no_grad()
-    def log_plot_history(self, data_loader, time, name):
+    def log_plot_history(self, data_loader, time, name, **kwargs):
         """Evaluation defined for a single epoch."""
 
         steps = len(data_loader)
         self._set_learning_phase(train=False)
+
+        return_results = kwargs.get("return_results",False)
+        get_results = kwargs.get("get_results",None)
 
         with Progress(transient=True, auto_refresh=False) as pg:
 
@@ -384,14 +387,24 @@ class Classification(Task):
         # preds, pred are logit vectors
         preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
         FEATURE = torch.cat(FEATURE)
-        snd_feature = TSNE().fit_transform(FEATURE)
+        if get_results is not None:
+            labels_unlabels = torch.cat([torch.ones_like(get_results[1]),torch.zeros_like(trues)])
+            preds = torch.cat([get_results[0], preds],axis=0)
+            trues = torch.cat([get_results[1],trues],axis=0)
+            FEATURE = torch.cat([get_results[2], FEATURE],axis=0)
+        snd_feature = TSNE(learning_rate=20).fit_transform(FEATURE)
         colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple']
 
         if len(trues.unique()) != preds.shape[1]:
             plt.figure(figsize=(12, 12))
             plt.subplot(2, 2, 1)
-            for c in trues.unique()[:preds.shape[1]]:
-                plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
+            if get_results is not None:
+                for c in trues.unique()[:preds.shape[1]]:
+                    plt.scatter(snd_feature[(labels_unlabels == 1) & (trues==c),0], snd_feature[(labels_unlabels == 1) & (trues==c),1],label=c.item(),c=colors[c], marker="o")
+                    plt.scatter(snd_feature[(labels_unlabels == 0) & (trues==c),0], snd_feature[(labels_unlabels == 0) & (trues==c),1],label=c.item(),c=colors[c], marker="*")
+            else:
+                for c in trues.unique()[:preds.shape[1]]:
+                    plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
             plt.legend()
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
@@ -406,20 +419,43 @@ class Classification(Task):
             plt.title('Via true labels - OOD')
 
             plt.subplot(2, 2, 3)
-            for idx,c in enumerate(range(preds.shape[1])):
-                plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
-                            snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
-                            label=c,c=colors[idx])
+            if get_results is not None:
+                for idx,c in enumerate(range(preds.shape[1])):
+                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),0],
+                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),1],
+                                label=c,c=colors[idx], marker='o')
+
+                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),0],
+                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),1],
+                                label=c,c=colors[idx], marker='*')
+            else:
+                for idx,c in enumerate(range(preds.shape[1])):
+                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
+                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
+                                label=c,c=colors[idx])
+
             plt.legend()
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
             plt.title('Via prediction - IN')
 
             plt.subplot(2, 2, 4)
-            for idx,c in enumerate(range(preds.shape[1])):
-                plt.scatter(snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),0],
-                            snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),1],
-                            label=c,c=colors[idx])
+            if get_results is not None:
+                for idx,c in enumerate(range(preds.shape[1])):
+                    plt.scatter(snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),0],
+                                snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),1],
+                                label=c,c=colors[idx], marker='o')
+                    
+                    plt.scatter(snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),0],
+                                snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),1],
+                                label=c,c=colors[idx], marker='*')
+
+            else:
+                for idx,c in enumerate(range(preds.shape[1])):
+                    plt.scatter(snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),0],
+                                snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),1],
+                                label=c,c=colors[idx])
+
             plt.legend()
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
@@ -430,18 +466,35 @@ class Classification(Task):
         else:
             plt.figure(figsize=(12, 6))
             plt.subplot(1, 2, 1)
-            for c in trues.unique()[:preds.shape[1]]:
-                plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
+            if get_results is not None:
+                for c in trues.unique()[:preds.shape[1]]:
+                    plt.scatter(snd_feature[(labels_unlabels == 1) & (trues==c),0], snd_feature[(labels_unlabels == 1) & (trues==c),1],label=c.item(),c=colors[c], marker='o')
+                    plt.scatter(snd_feature[(labels_unlabels == 0) & (trues==c),0], snd_feature[(labels_unlabels == 0) & (trues==c),1],label=c.item(),c=colors[c], marker='*')
+            else:
+                for c in trues.unique()[:preds.shape[1]]:
+                    plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
+
             plt.legend()
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
             plt.title('Via true labels - IN')
 
             plt.subplot(1, 2, 2)
-            for idx,c in enumerate(range(preds.shape[1])):
-                plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
-                            snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
-                            label=c,c=colors[idx])
+            if get_results is not None:
+                for idx,c in enumerate(range(preds.shape[1])):
+                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),0],
+                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),1],
+                                label=c,c=colors[idx], marker="o")
+                    
+                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),0],
+                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),1],
+                                label=c,c=colors[idx], marker="*")
+            else:
+                for idx,c in enumerate(range(preds.shape[1])):
+                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
+                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
+                                label=c,c=colors[idx])
+
             plt.legend()
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
@@ -449,3 +502,6 @@ class Classification(Task):
 
             plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}.png"))
             plt.close('all')
+
+        if return_results:
+            return preds, trues, FEATURE

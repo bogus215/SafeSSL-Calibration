@@ -62,6 +62,19 @@ def main_worker(local_rank: int, config: object):
         model = inceptionv4(class_nums=num_classes)
     else:
         raise NotImplementedError
+
+    # create logger
+    if local_rank == 0:
+        logfile = os.path.join(config.checkpoint_dir, 'main.log')
+        logger = get_rich_logger(logfile=logfile)
+        if config.enable_wandb:
+            configure_wandb(
+                name=f'{config.task} : {config.hash}',
+                project=f'SafeSSL-Calibration-{config.data}-{config.task}',
+                config=config
+            )
+    else:
+        logger = None
     
     # Network + Temperature (trainable)
     import torch.nn as nn
@@ -74,7 +87,7 @@ def main_worker(local_rank: int, config: object):
 
     if config.data in ['cifar10', 'cifar100']:
 
-        datasets, _ = load_CIFAR(root=config.root,data_name=config.data,n_valid_per_class=config.n_valid_per_class,seed=config.seed, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio)
+        datasets, _ = load_CIFAR(root=config.root,data_name=config.data,n_valid_per_class=config.n_valid_per_class,seed=config.seed, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio, logger=logger)
 
         labeled_set = CIFAR(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
         unlabeled_set = CIFAR_STRONG(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
@@ -83,18 +96,6 @@ def main_worker(local_rank: int, config: object):
         open_test_set = CIFAR(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
     else:
         raise NotImplementedError
-
-    if local_rank == 0:
-        logfile = os.path.join(config.checkpoint_dir, 'main.log')
-        logger = get_rich_logger(logfile=logfile)
-        if config.enable_wandb:
-            configure_wandb(
-                name=f'{config.task} : {config.hash}',
-                project=f'SafeSSL-Calibration-{config.data}-{config.task}',
-                config=config
-            )
-    else:
-        logger = None
 
     if local_rank == 0:
         logger.info(f'Data: {config.data}')
@@ -132,6 +133,7 @@ def main_worker(local_rank: int, config: object):
         warm_up_end=config.warm_up,
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
+        enable_plot=config.enable_plot,
         logger=logger
     )
     elapsed_sec = time.time() - start
