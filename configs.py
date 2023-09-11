@@ -221,6 +221,18 @@ class CaliMATCHPlusConfig(CaliMATCHConfig):
     def task(self) -> str:
         return "CaliMATCH+"
 
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--tau', type=float, default=0.95)
+        parser.add_argument('--consis-coef', type=float, default=1)
+        parser.add_argument('--consis-coef2', type=float, default=0.5)
+        parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
+
+        return parser
+
 class PseudoLabelConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
         super(PseudoLabelConfig, self).__init__(args, **kwargs)
