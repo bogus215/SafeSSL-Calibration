@@ -238,7 +238,7 @@ class Classification(Task):
                 if self.local_rank == 0:
                     desc = f"[bold green] [{i+1}/{iteration}]: "
                     for k, v in result.items():
-                        desc += f" {k} : {v[:i+1].mean():.4f} |"
+                        desc += f" {k} : {torch.nanmean(v[:i+1][v[:i+1]!=0]):.4f} |"
                     pg.update(task, advance=1., description=desc)
                     pg.refresh()
 
@@ -246,7 +246,7 @@ class Classification(Task):
                 if self.scheduler is not None:
                     self.scheduler.step()
 
-        return {k: v.mean().item() for k, v in result.items()}, label_iterator, unlabel_iterator
+        return {k: torch.nanmean(v[v!=0]).item() for k, v in result.items()}, label_iterator, unlabel_iterator
 
     @torch.no_grad()
     def evaluate(self, data_loader, n_bins, train_n_bins):
