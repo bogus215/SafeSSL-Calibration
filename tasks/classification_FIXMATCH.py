@@ -46,6 +46,7 @@ class Classification(Task):
         train_u_loader = DataLoader(train_set[1],batch_size=batch_size//2,sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
         train_u_iterator = iter(train_u_loader)
         
+        label_loader = DataLoader(train_set[0],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         unlabel_loader = DataLoader(train_set[1],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
@@ -69,7 +70,8 @@ class Classification(Task):
             train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
             if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
-                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel")
+                label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
+                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
                 self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
 
             epoch_history = collections.defaultdict(dict)
@@ -183,7 +185,7 @@ class Classification(Task):
                 if self.local_rank == 0:
                     desc = f"[bold green] [{i+1}/{iteration}]: "
                     for k, v in result.items():
-                        desc += f" {k} : {v[:i+1].mean():.4f} |"
+                        desc += f" {k} : {torch.nanmean(v[:i+1][v[:i+1]!=0]):.4f} |"
                     pg.update(task, advance=1., description=desc)
                     pg.refresh()
 
@@ -191,4 +193,4 @@ class Classification(Task):
                 if self.scheduler is not None:
                     self.scheduler.step()
 
-        return {k: v.mean().item() for k, v in result.items()}, label_iterator, unlabel_iterator
+        return {k: torch.nanmean(v[v!=0]).item() for k, v in result.items()}, label_iterator, unlabel_iterator
