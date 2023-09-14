@@ -131,12 +131,11 @@ class Classification(Task):
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'warm_up_coef': torch.zeros(iteration, device=self.local_rank),
-            'warm_up_coef2': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
             "Temperature": torch.zeros(iteration, device=self.local_rank),
             'cali_loss': torch.zeros(iteration, device=self.local_rank),
             'label_cross_entropy' : torch.zeros(iteration, device=self.local_rank),
-            "unlabeled_cali_ood_loss": torch.zeros(iteration, device=self.local_rank),
+            "unlabeled_cali_wrong_loss": torch.zeros(iteration, device=self.local_rank),
             "unlabeled_cali_in_loss": torch.zeros(iteration, device=self.local_rank),
         }
         
@@ -210,12 +209,11 @@ class Classification(Task):
                         label_loss += cali_loss
 
                     warm_up_coef = consis_coef*math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
-                    # warm_up_coef2 = consis_coef2*math.exp(-5 * (1 - max(self.trained_iteration/self.warm_up_end, 1))**2)
-                    warm_up_coef2 = consis_coef2
 
                     if used_unlabeled_index.sum().item() != 0:
                         unlabel_train_logits = unlabel_strong_logit[used_unlabeled_index]
-                        unlabel_train_y = nn.functional.one_hot(unlabel_pseudo_y[used_unlabeled_index], num_classes=6).float()
+                        unlabel_train_y = nn.functional.one_hot(unlabel_pseudo_y[used_unlabeled_index], num_classes=unlabel_strong_logit.size(1)).float()
+
                         unlabel_train_noisy_index = torch.rand(unlabel_train_y.size(0)) <= (1-tau)
                         unlabel_train_noisy_index = unlabel_train_noisy_index.to(self.local_rank)
                         
@@ -223,17 +221,17 @@ class Classification(Task):
                             unlabel_train_y[unlabel_train_noisy_index] = (torch.ones(unlabel_train_noisy_index.sum(), self.backbone.output.out_features, device=self.local_rank) / self.backbone.output.out_features)
                             unlabeled_losses = -(unlabel_train_logits.log_softmax(1)*unlabel_train_y).sum(1)
                             
-                            warm_up_coefs = torch.where(unlabel_train_noisy_index,warm_up_coef2, warm_up_coef)
+                            warm_up_coefs = torch.where(unlabel_train_noisy_index, consis_coef2, warm_up_coef)
                             unlabel_loss = (unlabeled_losses*warm_up_coefs).mean()
                             
                             # just for logging
                             with torch.no_grad():
-                                ood_idx = unlabel_y[used_unlabeled_index]>=self.backbone.output.out_features
-                                unlabeled_cali_ood_loss = unlabeled_losses[(ood_idx) & (unlabel_train_noisy_index)].mean()
-                                unlabeled_cali_in_loss = unlabeled_losses[(~ood_idx) & (unlabel_train_noisy_index)].mean()
+                                wrong_idx = unlabel_y[used_unlabeled_index]!=unlabel_pseudo_y[used_unlabeled_index]
+                                unlabeled_cali_wrong_loss = unlabeled_losses[(wrong_idx) & (unlabel_train_noisy_index)].mean()
+                                unlabeled_cali_in_loss = unlabeled_losses[(~wrong_idx) & (unlabel_train_noisy_index)].mean()
                         else:
                             unlabel_loss = self.loss_function(unlabel_train_logits, unlabel_pseudo_y[used_unlabeled_index].long()) * warm_up_coef
-                            unlabeled_cali_ood_loss = torch.zeros(1).to(self.local_rank)
+                            unlabeled_cali_wrong_loss = torch.zeros(1).to(self.local_rank)
                             unlabeled_cali_in_loss = torch.zeros(1).to(self.local_rank)
                     else:
                         unlabel_loss = torch.zeros(1).to(self.local_rank)
@@ -259,10 +257,9 @@ class Classification(Task):
                     result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
                     result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
                                                               targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
-                    result["unlabeled_cali_ood_loss"][i] = unlabeled_cali_ood_loss.detach()
+                    result["unlabeled_cali_wrong_loss"][i] = unlabeled_cali_wrong_loss.detach()
                     result["unlabeled_cali_in_loss"][i] = unlabeled_cali_in_loss.detach()
                 result['warm_up_coef'][i] = warm_up_coef
-                result['warm_up_coef2'][i] = warm_up_coef2
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
                 result["Temperature"][i] = self.backbone.temperature.item()
 
