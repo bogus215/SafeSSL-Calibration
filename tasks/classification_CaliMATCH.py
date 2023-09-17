@@ -66,11 +66,17 @@ class Classification(Task):
         self.warm_up_end = warm_up_end
         self.trained_iteration = 0
 
+        # SWA on off
+        swa_on = kwargs.get("swa_on", False)
+        swa_start = kwargs.get('swa_start',100000)
+
         for epoch in range(1, epochs + 1):
 
             # Train & evaluate
             train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, smoothing_proposed=None if epoch==1 else ece_results, n_bins=n_bins)
-            eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
+            if swa_on and self.trained_iteration>=swa_start:
+                self.swa_opt.update(self.backbone)
+            eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins, swa_on=swa_on, swa_start=swa_start)
             if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
                 label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
                 self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
@@ -103,7 +109,7 @@ class Classification(Task):
                     ckpt = os.path.join(self.ckpt_dir, "ckpt.best.pth.tar")
                     self.save_checkpoint(ckpt, epoch=epoch)
 
-                test_history = self.evaluate(test_loader, n_bins=n_bins, train_n_bins=train_n_bins)
+                test_history = self.evaluate(test_loader, n_bins=n_bins, train_n_bins=train_n_bins, swa_on=swa_on, swa_start=swa_start)
                 for k, v1 in test_history[0].items():
                     epoch_history[k]['test'] = v1
 
@@ -249,7 +255,7 @@ class Classification(Task):
         return {k: torch.nanmean(v[v!=0]).item() for k, v in result.items()}, label_iterator, unlabel_iterator
 
     @torch.no_grad()
-    def evaluate(self, data_loader, n_bins, train_n_bins):
+    def evaluate(self, data_loader, n_bins, train_n_bins, **kwargs):
         """Evaluation defined for a single epoch."""
 
         steps = len(data_loader)
@@ -259,6 +265,9 @@ class Classification(Task):
             'top@1': torch.zeros(1, device=self.local_rank),
             'ece': torch.zeros(1, device=self.local_rank)
         }
+
+        swa_on = kwargs.get('swa_on',False)
+        swa_start = kwargs.get('swa_start',100000)
 
         with Progress(transient=True, auto_refresh=False) as pg:
 
@@ -272,8 +281,13 @@ class Classification(Task):
                 y = batch['y'].to(self.local_rank)
                 idx = batch['idx'].to(self.local_rank)
 
-                logits = self.predict(x)
-                logits = self.backbone.scaling_logits(logits)
+                if swa_on and self.trained_iteration>=swa_start:
+                    logits = self.swa_model(x)
+                    logits = self.swa_model.scaling_logits(logits)
+                else:
+                    logits = self.predict(x)
+                    logits = self.backbone.scaling_logits(logits)
+                    
                 loss = self.loss_function(logits, y.long())
 
                 result['loss'][i] = loss

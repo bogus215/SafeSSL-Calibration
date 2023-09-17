@@ -206,6 +206,8 @@ class CaliMATCHConfig(ConfigBase):
         parser.add_argument('--tau', type=float, default=0.95)
         parser.add_argument('--consis-coef', type=float, default=1)
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
+        parser.add_argument('--swa-on', action='store_true', help='swa optimizer on.')
+        parser.add_argument('--swa-start-iter', default=100000, type=int)
 
         return parser
 

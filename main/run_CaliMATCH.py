@@ -117,7 +117,8 @@ def main_worker(local_rank: int, config: object):
         mixed_precision=config.mixed_precision,
         gamma = config.gamma,
         milestones= config.milestones,
-        weight_decay=config.weight_decay
+        weight_decay=config.weight_decay,
+        swa_on= config.swa_on
     )
 
     # Train & evaluate
@@ -134,6 +135,8 @@ def main_worker(local_rank: int, config: object):
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,
+        swa_on=config.swa_on,
+        swa_start=config.swa_start_iter,
         logger=logger
     )
     elapsed_sec = time.time() - start

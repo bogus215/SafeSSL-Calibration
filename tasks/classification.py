@@ -7,14 +7,14 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from tsnecuda import TSNE
+from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 plt.style.use('bmh')
 
 from tasks.base import Task
 from utils import RandomSampler, TopKAccuracy
 from utils.logging import make_epoch_description
-from utils.optimization import get_optimizer, get_multi_step_scheduler
+from utils.optimization import get_optimizer, get_multi_step_scheduler, WeightSWA
 
 
 class Classification(Task):
@@ -70,6 +70,23 @@ class Classification(Task):
             lr=learning_rate,
             weight_decay=weight_decay
         )
+        
+        # Stochastic weight average On
+        swa_on = kwargs.get('swa_on',False)
+        if swa_on:
+
+            def create_model(model, no_grad=False):
+                from copy import deepcopy
+                s_model=deepcopy(model)
+                if no_grad:
+                    for param in s_model.parameters():
+                        param.detach_()
+                return s_model
+            self.swa_model = create_model(self.backbone, no_grad=True)
+            self.swa_model.eval()
+            
+            self.swa_opt = WeightSWA(self.swa_model)
+        
         self.scheduler = get_multi_step_scheduler(
             optimizer = self.optimizer,
             milestones = self.milestones,
