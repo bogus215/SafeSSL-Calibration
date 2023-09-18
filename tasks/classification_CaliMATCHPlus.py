@@ -234,6 +234,7 @@ class Classification(Task):
                                 wrong_idx = unlabel_y[~used_unlabeled_index] != unlabel_pseudo_y[~used_unlabeled_index]
                                 unlabeled_cali_wrong_loss = unlabeled_cali_losses[(wrong_idx)[unlabel_train_noisy_index]].mean()
                                 unlabeled_cali_in_loss = unlabeled_cali_losses[(~wrong_idx)[unlabel_train_noisy_index]].mean()
+                                result["unlabeled_cali_loss"][i] = unlabeled_cali_losses.mean().detach().item()
                                 
                         else:
                             unlabeled_cali_wrong_loss = torch.zeros(1).to(self.local_rank)
@@ -268,7 +269,6 @@ class Classification(Task):
                                                               targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                     result["unlabeled_cali_wrong_loss"][i] = unlabeled_cali_wrong_loss.detach()
                     result["unlabeled_cali_in_loss"][i] = unlabeled_cali_in_loss.detach()
-                    result["unlabeled_cali_loss"][i] = unlabeled_cali_losses.mean().item()
                     result["unlabeled_cali_loss_threshold"][i] = self.threhold_loss
                 result['warm_up_coef'][i] = warm_up_coef
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
