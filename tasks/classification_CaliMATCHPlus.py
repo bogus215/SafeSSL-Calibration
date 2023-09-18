@@ -255,7 +255,7 @@ class Classification(Task):
                     result['cali_loss'][i] = cali_loss.detach()
                 if used_unlabeled_index.sum().item() != 0:
                     result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
-                    result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
+                    result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_scaled_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
                                                               targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                     result["unlabeled_cali_wrong_loss"][i] = unlabeled_cali_wrong_loss.detach()
                     result["unlabeled_cali_in_loss"][i] = unlabeled_cali_in_loss.detach()
