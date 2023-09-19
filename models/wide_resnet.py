@@ -8,6 +8,8 @@ class BatchNorm2d(nn.BatchNorm2d):
     def __init__(self, channels, momentum=1e-3, eps=1e-3):
         super().__init__(channels)
         self.update_batch_stats = True
+        self.momentum = momentum
+        self.eps = eps
 
     def forward(self, x):
         if self.update_batch_stats:
