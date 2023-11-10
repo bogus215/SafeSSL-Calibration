@@ -8,8 +8,6 @@ class BatchNorm2d(nn.BatchNorm2d):
     def __init__(self, channels, momentum=1e-3, eps=1e-3):
         super().__init__(channels)
         self.update_batch_stats = True
-        self.momentum = momentum
-        self.eps = eps
 
     def forward(self, x):
         if self.update_batch_stats:
@@ -75,6 +73,8 @@ class WRN(nn.Module):
         self.unit4 = nn.Sequential(*[BatchNorm2d(filters[3]), relu(), nn.AdaptiveAvgPool2d(1)])
 
         self.output = nn.Linear(filters[3], num_classes)
+
+        self.class_num = num_classes
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
