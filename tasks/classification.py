@@ -405,6 +405,9 @@ class Classification(Task):
         preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
         FEATURE = torch.cat(FEATURE)
         if get_results is not None:
+            
+            # get_results=[label_preds, label_trues, label_FEATURE]
+            
             labels_unlabels = torch.cat([torch.ones_like(get_results[1]),torch.zeros_like(trues)])
             preds = torch.cat([get_results[0], preds],axis=0)
             trues = torch.cat([get_results[1],trues],axis=0)
@@ -413,7 +416,7 @@ class Classification(Task):
         colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple']
 
         if len(trues.unique()) != preds.shape[1]:
-            plt.figure(figsize=(12, 12))
+            plt.figure(figsize=(24, 24))
             plt.subplot(2, 2, 1)
             if get_results is not None:
                 for c in trues.unique()[:preds.shape[1]]:
@@ -422,7 +425,7 @@ class Classification(Task):
             else:
                 for c in trues.unique()[:preds.shape[1]]:
                     plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
-            plt.legend()
+            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4)
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
             plt.title('Via true labels - IN')
@@ -430,7 +433,7 @@ class Classification(Task):
             plt.subplot(2, 2, 2)
             for c in trues.unique()[preds.shape[1]:]:
                 plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
-            plt.legend()
+            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4)
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
             plt.title('Via true labels - OOD')
@@ -451,10 +454,10 @@ class Classification(Task):
                                 snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
                                 label=c,c=colors[idx])
 
-            plt.legend()
+            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4)
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-            plt.title('Via prediction - IN')
+            plt.title('Via predicted label - IN(but, this is true)')
 
             plt.subplot(2, 2, 4)
             for idx,c in enumerate(range(preds.shape[1])):
@@ -462,13 +465,24 @@ class Classification(Task):
                             snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),1],
                             label=c,c=colors[idx])
 
-            plt.legend()
+            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4)
             plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
             plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-            plt.title('Via prediction - OOD')
+            plt.title('Via predicted label - OOD(but, this is true)')
 
             plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}.png"))
             plt.close('all')
+            
+            if get_results is not None:
+                plt.scatter(snd_feature[(labels_unlabels == 0) & (trues>=preds.shape[1]),0], snd_feature[(labels_unlabels == 0) & (trues>=preds.shape[1]),1],label="unlabel-ood",c='black', marker="*",s=5,alpha=.5)
+                plt.scatter(snd_feature[(labels_unlabels == 0) & (trues<preds.shape[1]),0], snd_feature[(labels_unlabels == 0) & (trues<preds.shape[1]),1],label="unlabel-In",c='blue', marker="*",s=5,alpha=.5)
+                plt.scatter(snd_feature[(labels_unlabels == 1),0], snd_feature[(labels_unlabels == 1),1],label="label",c='red', marker="o",s=5,alpha=.5)
+                plt.legend()
+                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+                plt.title('Label or Unlabel')
+                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=label-or-unlabel.png"))
+                plt.close('all')
         else:
             plt.figure(figsize=(12, 6))
             plt.subplot(1, 2, 1)
