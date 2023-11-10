@@ -4,8 +4,9 @@
 --n-label-per-class=400
 --n-valid-per-class=500
 --mismatch-ratio=0.60
---tau=0.95
+--tau=0.5
 --consis-coef=1
 --save-every=500
 --iterations=1000
 --n-bins=15
+--enable-plot
