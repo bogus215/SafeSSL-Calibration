@@ -70,10 +70,13 @@ class Classification(Task):
             # Train & evaluate
             train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
-            if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
-                label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
-                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
-                self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
+            try:
+                if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
+                    label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
+                    self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
+                    self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
+            except:
+                pass
 
             epoch_history = collections.defaultdict(dict)
             for k, v1 in train_history.items():

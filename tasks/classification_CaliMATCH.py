@@ -77,10 +77,13 @@ class Classification(Task):
             if swa_on and self.trained_iteration>=swa_start:
                 self.swa_opt.update(self.backbone)
             eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins, swa_on=swa_on, swa_start=swa_start)
-            if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
-                label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
-                self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
-                self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
+            try:
+                if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
+                    label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
+                    self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
+                    self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
+            except:
+                pass
 
             epoch_history = collections.defaultdict(dict)
             for k, v1 in train_history.items():
