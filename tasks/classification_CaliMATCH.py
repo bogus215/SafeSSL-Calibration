@@ -73,7 +73,7 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Train & evaluate
-            train_history, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, smoothing_proposed=None if epoch==1 else ece_results, n_bins=n_bins)
+            train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, smoothing_proposed=None if epoch==1 else ece_results, n_bins=n_bins)
             if swa_on and self.trained_iteration>=swa_start:
                 self.swa_opt.update(self.backbone)
             eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins, swa_on=swa_on, swa_start=swa_start)
@@ -99,6 +99,8 @@ class Classification(Task):
                 if self.scheduler is not None:
                     lr = self.scheduler.get_last_lr()[0]
                     self.writer.add_scalar('lr', lr, global_step=epoch)
+                self.writer.add_scalar("trained_unlabeled_data_in", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key<self.backbone.class_num]).item() , global_step=epoch)
+                self.writer.add_scalar("trained_unlabeled_data_ood", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key>=self.backbone.class_num]).item() , global_step=epoch)
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
@@ -141,6 +143,8 @@ class Classification(Task):
             "Temperature": torch.zeros(iteration, device=self.local_rank),
             'cali_loss': torch.zeros(iteration, device=self.local_rank)
         }
+        
+        cls_wise_results = {i:torch.zeros(iteration) for i in range(10)} if self.backbone.class_num==6 else {i:torch.zeros(iteration) for i in range(100)}
         
         with Progress(transient=True, auto_refresh=False) as pg:
 
@@ -241,10 +245,16 @@ class Classification(Task):
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
                 result["Temperature"][i] = self.backbone.temperature.item()
 
+                unique, counts = np.unique(unlabel_y[used_unlabeled_index].cpu().numpy(), return_counts = True)
+                uniq_cnt_dict = dict(zip(unique, counts))
+                
+                for key,value in uniq_cnt_dict.items():
+                    cls_wise_results[key][i] = value
+                    
                 if self.local_rank == 0:
                     desc = f"[bold green] [{i+1}/{iteration}]: "
                     for k, v in result.items():
-                        desc += f" {k} : {torch.nanmean(v[:i+1][v[:i+1]!=0]):.4f} |"
+                        desc += f" {k} : {v[:i+1].mean():.4f} |"
                     pg.update(task, advance=1., description=desc)
                     pg.refresh()
 
@@ -252,7 +262,7 @@ class Classification(Task):
                 if self.scheduler is not None:
                     self.scheduler.step()
 
-        return {k: torch.nanmean(v[v!=0]).item() for k, v in result.items()}, label_iterator, unlabel_iterator
+        return {k: v.mean().item() for k, v in result.items()}, cls_wise_results, label_iterator, unlabel_iterator
 
     @torch.no_grad()
     def evaluate(self, data_loader, n_bins, train_n_bins, **kwargs):
