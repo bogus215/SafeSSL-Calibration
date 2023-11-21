@@ -245,7 +245,7 @@ class Classification(Task):
                 if used_unlabeled_index.sum().item() != 0:
                     with torch.cuda.amp.autocast(self.mixed_precision):
                         reverse_unlabel_features = self.backbone.get_only_feature(unlabel_weak_x[used_unlabeled_index])
-                        reverse_logits = self.backbone.reverse(self.backbone.output(reverse_unlabel_features.view(used_unlabeled_index.sum().item(),-1)))
+                        reverse_logits = self.backbone.output(self.backbone.reverse(reverse_unlabel_features.view(used_unlabeled_index.sum().item(),-1)))
                         entropy_loss = (reverse_logits.softmax(1)*reverse_logits.log_softmax(1)).sum(1).mean()*entropy_coef
 
                     if self.scaler is not None:
