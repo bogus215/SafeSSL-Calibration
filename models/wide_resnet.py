@@ -5,9 +5,10 @@ def conv3x3(i_c, o_c, stride=1):
     return nn.Conv2d(i_c, o_c, 3, stride, 1, bias=False)
 
 class BatchNorm2d(nn.BatchNorm2d):
-    def __init__(self, channels, momentum=1e-3, eps=1e-3):
+    def __init__(self, channels, eps=1e-3):
         super().__init__(channels)
         self.update_batch_stats = True
+        self.eps = eps
 
     def forward(self, x):
         if self.update_batch_stats:
@@ -108,8 +109,18 @@ class WRN(nn.Module):
 
         # Expand temperature to match the size of logits
         temperature = self.temperature.unsqueeze(1).expand(logits.size(0), logits.size(1))
-        return logits / (torch.abs(temperature)+1e-5)
+        return torch.nn.functional.normalize(logits) / (torch.abs(temperature)+1e-5)
     
+    def get_only_feature(self, x):
+
+        x = self.init_conv(x)
+        x = self.unit1(x)
+        x = self.unit2(x)
+        x = self.unit3(x)
+        f = self.unit4(x)
+        
+        return f
+
     def scaling_logits_via_mlp(self, logits):
 
         return self.mlp_scaler(logits)
