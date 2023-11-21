@@ -214,7 +214,29 @@ class CaliMATCHConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "CaliMATCH"
-    
+
+class ProposedConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(ProposedConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--tau', type=float, default=0.95)
+        parser.add_argument('--pi', type=float, default=0.05)
+        parser.add_argument('--consis-coef', type=float, default=1)
+        parser.add_argument('--cali-coef', type=float, default=1)
+        parser.add_argument('--entropy-coef', type=float, default=.1)
+        parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "Proposed"
+
 class CaliMATCHPlusConfig(CaliMATCHConfig):
     def __init__(self, args=None, **kwargs):
         super(CaliMATCHPlusConfig, self).__init__(args, **kwargs)
@@ -231,6 +253,7 @@ class CaliMATCHPlusConfig(CaliMATCHConfig):
         parser.add_argument('--tau', type=float, default=0.95)
         parser.add_argument('--consis-coef', type=float, default=1)
         parser.add_argument('--consis-coef2', type=float, default=0.5)
+        parser.add_argument('--consis-coef3', type=float, default=1)
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
 
         return parser
