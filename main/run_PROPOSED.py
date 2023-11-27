@@ -89,7 +89,7 @@ def main_worker(local_rank: int, config: object):
                                      nn.Linear(feature,feature),
                                      nn.LayerNorm(feature),
                                      nn.LeakyReLU(0.1),
-                                     nn.Linear(feature,2))
+                                     nn.Linear(feature,2,bias=False))
         def forward(self,x):
             x_ = x.detach()
             return self.mlp(x_)

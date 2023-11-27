@@ -73,7 +73,7 @@ class WRN(nn.Module):
 
         self.unit4 = nn.Sequential(*[BatchNorm2d(filters[3]), relu(), nn.AdaptiveAvgPool2d(1)])
 
-        self.output = nn.Linear(filters[3], num_classes)
+        self.output = nn.Linear(filters[3], num_classes, bias=False)
 
         self.class_num = num_classes
 
@@ -85,7 +85,7 @@ class WRN(nn.Module):
                 nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
                 nn.init.xavier_normal_(m.weight)
-                nn.init.constant_(m.bias, 0)
+                # nn.init.constant_(m.bias, 0)
 
     def forward(self, x, return_feature=False):
 
@@ -93,7 +93,7 @@ class WRN(nn.Module):
         x = self.unit1(x)
         x = self.unit2(x)
         x = self.unit3(x)
-        f = self.unit4(x)
+        f = nn.functional.normalize(self.unit4(x))
         c = self.output(f.squeeze())
         if return_feature:
             return [c, f]

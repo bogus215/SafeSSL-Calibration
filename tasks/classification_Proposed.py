@@ -15,6 +15,7 @@ from utils.logging import make_epoch_description
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 plt.style.use('bmh')
+import seaborn as sns
 
 class Classification(Task):
     def __init__(self, backbone: nn.Module):
@@ -79,8 +80,8 @@ class Classification(Task):
             eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
             try:
                 if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
-                    label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
-                    self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
+                    label_preds, label_trues, label_FEATURE, label_CLS_LOSS, label_IDX = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
+                    self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE, label_CLS_LOSS, label_IDX])
                     self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
             except:
                 pass
@@ -402,7 +403,7 @@ class Classification(Task):
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Plotting...", total=steps)
 
-            pred,true,IDX,FEATURE, CLS_LOSS_IN, CLS_LOSS_OOD =[],[],[],[], [], []
+            pred,true,IDX,FEATURE, CLS_LOSSES =[],[],[],[],[]
             for i, batch in enumerate(data_loader):
 
                 try:
@@ -413,6 +414,7 @@ class Classification(Task):
                 idx = batch['idx'].to(self.local_rank)
 
                 logits, feature = self.get_feature(x)
+                logits = self.backbone.scaling_logits(logits)
                 true.append(y.cpu())
                 pred.append(logits.cpu())
                 FEATURE.append(feature.squeeze().cpu())
@@ -420,10 +422,13 @@ class Classification(Task):
 
                 if name == 'unlabel':
                     cls_losses = -(self.backbone.mlp(feature.squeeze()).log_softmax(1) * torch.nn.functional.one_hot(torch.ones_like(y), 2)).sum(1)
-                    cls_loss_in, cls_loss_ood = cls_losses[y < self.backbone.class_num].cpu(), cls_losses[y >= self.backbone.class_num].cpu()
-                    CLS_LOSS_IN.append(cls_loss_in)
-                    CLS_LOSS_OOD.append(cls_loss_ood)
-                
+                    CLS_LOSSES.append(cls_losses)
+                elif name == 'label':
+                    cls_losses = -(self.backbone.mlp(feature.squeeze()).log_softmax(1) * torch.nn.functional.one_hot(torch.zeros_like(y), 2)).sum(1)
+                    CLS_LOSSES.append(cls_losses)
+                else:
+                    pass
+
                 if self.local_rank == 0:
                     desc = f"[bold green] [{i+1}/{steps}]: Having feature vector..."
                     pg.update(task, advance=1., description=desc)
@@ -432,14 +437,21 @@ class Classification(Task):
         # preds, pred are logit vectors
         preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
         FEATURE = torch.cat(FEATURE)
+        IDX = torch.cat(IDX)
+        if name in ['label','unlabel']:
+            CLS_LOSSES = torch.cat(CLS_LOSSES)
+            CLS_LOSS_IN = CLS_LOSSES[trues<self.backbone.class_num]
+            CLS_LOSS_OOD = CLS_LOSSES[trues>=self.backbone.class_num]
+            
         if get_results is not None:
             
-            # get_results=[label_preds, label_trues, label_FEATURE]
+            # get_results=[label_preds, label_trues, label_FEATURE, label_CLS_LOSS]
             
             labels_unlabels = torch.cat([torch.ones_like(get_results[1]),torch.zeros_like(trues)])
             preds = torch.cat([get_results[0], preds],axis=0)
             trues = torch.cat([get_results[1],trues],axis=0)
             FEATURE = torch.cat([get_results[2], FEATURE],axis=0)
+            CLS_LOSSES = torch.cat([get_results[3],CLS_LOSSES],axis=0)
         snd_feature = TSNE(learning_rate=20).fit_transform(FEATURE)
         colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple']
 
@@ -511,6 +523,59 @@ class Classification(Task):
                 plt.title('Label or Unlabel')
                 plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=label-or-unlabel.png"))
                 plt.close('all')
+
+                plt.scatter(snd_feature[(labels_unlabels == 1),0], snd_feature[(labels_unlabels == 1),1],
+                            c=CLS_LOSSES[labels_unlabels==1].cpu().numpy(),
+                            marker="o",s=5,
+                            cmap='viridis',
+                            alpha=.5)
+                plt.colorbar()
+                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+                plt.title('Label Feature with cls loss')
+                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-label-with-cls-loss.png"))
+                plt.close('all')
+
+                plt.scatter(snd_feature[(labels_unlabels==0),0], snd_feature[(labels_unlabels==0),1],
+                            c=CLS_LOSSES[labels_unlabels==0].cpu().numpy(),
+                            marker="o",s=5,
+                            cmap='viridis',
+                            alpha=.5)
+                plt.colorbar()
+                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+                plt.title('Unlabel Feature with cls loss')
+                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-unlabel-with-cls-loss.png"))
+                plt.close('all')
+
+                plt.scatter(snd_feature[(labels_unlabels == 1),0], snd_feature[(labels_unlabels == 1),1],
+                            c=preds.softmax(1).max(1)[0][labels_unlabels==1].cpu().numpy(),
+                            marker="o",s=5,
+                            cmap='viridis',
+                            alpha=.5)
+                plt.colorbar()
+                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+                plt.title('Label Feature with conf')
+                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-label-with-conf.png"))
+                plt.close('all')
+
+                plt.scatter(snd_feature[(labels_unlabels==0),0], snd_feature[(labels_unlabels==0),1],
+                            c=preds.softmax(1).max(1)[0][labels_unlabels==0].cpu().numpy(),
+                            marker="o",s=5,
+                            cmap='viridis',
+                            alpha=.5)
+                plt.colorbar()
+                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
+                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
+                plt.title('Unlabel Feature with conf')
+                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-unlabel-with-conf.png"))
+                plt.close('all')
+                
+                sns.jointplot(x=preds.softmax(1).max(1)[0][labels_unlabels==0].cpu().numpy(), y=CLS_LOSSES[labels_unlabels==0].cpu().numpy(), marginal_kws=dict(bins=25, fill=False))
+                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-label-with-conf-cls-loss.png"))
+                plt.close('all')
+                
         else:
             plt.figure(figsize=(12, 6))
             plt.subplot(1, 2, 1)
@@ -552,12 +617,20 @@ class Classification(Task):
             plt.close('all')
 
         if name == 'unlabel':
-            plt.hist(torch.cat(CLS_LOSS_IN).numpy(), label='Unlabel-In', alpha=.5, bins=100)
-            plt.hist(torch.cat(CLS_LOSS_OOD).numpy(), label='Unlabel-Ood', alpha=.5, bins=100)
-            plt.xlim(0,2)
+            plt.hist((CLS_LOSS_IN).cpu().numpy(), label='Unlabel-In', alpha=.5, bins=100)
+            plt.hist((CLS_LOSS_OOD).cpu().numpy(), label='Unlabel-Ood', alpha=.5, bins=100)
+            plt.xlim(0,3)
+            plt.legend()
+            plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}+Unlabel+Cls+loss.png"))
+            plt.close('all')
+
+            plt.hist(CLS_LOSSES[labels_unlabels==1].cpu().numpy(), label='Label', alpha=.5, bins=100)
+            plt.hist((CLS_LOSS_IN).cpu().numpy(), label='Unlabel-In', alpha=.5, bins=100)
+            plt.hist((CLS_LOSS_OOD).cpu().numpy(), label='Unlabel-Ood', alpha=.5, bins=100)
+            plt.xlim(0,3)
             plt.legend()
             plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}+Label+Unlabel+Cls+loss.png"))
             plt.close('all')
             
         if return_results:
-            return preds, trues, FEATURE
+            return preds, trues, FEATURE, CLS_LOSS_IN, IDX
