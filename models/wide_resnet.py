@@ -115,7 +115,10 @@ class WRN(nn.Module):
 
         # Expand temperature to match the size of logits
         temperature = self.temperature.unsqueeze(1).expand(logits.size(0), logits.size(1))
-        return torch.nn.functional.normalize(logits) / (torch.abs(temperature)+1e-5)
+        if self.normalize:
+            logits = torch.nn.functional.normalize(logits)
+        
+        return logits / (torch.abs(temperature)+1e-5)
     
     def get_only_feature(self, x):
 
@@ -126,7 +129,3 @@ class WRN(nn.Module):
         f = nn.functional.normalize(self.unit4(x)) if self.normalize else self.unit4(x)
         
         return f
-
-    def scaling_logits_via_mlp(self, logits):
-
-        return self.mlp_scaler(logits)
