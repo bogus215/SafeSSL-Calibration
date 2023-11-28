@@ -132,7 +132,7 @@ def main_worker(local_rank: int, config: object):
     
     elif config.data == 'tiny':
         
-        datasets, _ = load_tiny(root=config.roo , n_label_per_class=config.n_label_per_class,n_valid_per_class=config.n_valid_per_class,mismatch_ratio=config.mismatch_ratio,seed=config.seed,logger=logger)
+        datasets, _ = load_tiny(root=config.root , n_label_per_class=config.n_label_per_class,n_valid_per_class=config.n_valid_per_class,mismatch_ratio=config.mismatch_ratio,seed=config.seed,logger=logger)
 
         labeled_set = TinyImageNet(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
         unlabeled_set = TinyImageNet_STRONG(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
