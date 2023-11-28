@@ -115,7 +115,7 @@ class ConfigBase(object):
         parser.add_argument('--data', type=str, default='cifar10', choices=('cifar10', 'cifar100', 'tiny','svhn'))
         parser.add_argument('--mismatch-ratio', type=float, default=0.30)
         parser.add_argument('--n-label-per-class', type=int, default=400)
-        parser.add_argument('--n-valid-per-class', type=int, default=500)
+        parser.add_argument('--n-valid-per-class', type=int, default=None , help = '10%')
         parser.add_argument('--input-size', type=int, default=32, choices=(32, 64, 96, 224))
         parser.add_argument('--seed', type=int, default=1)
         parser.add_argument('--augmentation', type=str, default='torchvision', choices=('torchvision', 'albumentations'), help='Package used for augmentation.')
