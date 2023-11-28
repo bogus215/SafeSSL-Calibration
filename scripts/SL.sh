@@ -33,7 +33,7 @@ do
                             --weight-decay 0
 
     python ./main/run_SL.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
-                            --data tiny --server main --enable-wandb \
+                            --data svhn --server main --enable-wandb \
                             --n-label-per-class 50 \
                             --mismatch-ratio 0.60 --mixed-precision \
                             --save-every 5000 --learning-rate 3e-3 \

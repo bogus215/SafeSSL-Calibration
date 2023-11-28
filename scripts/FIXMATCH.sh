@@ -39,7 +39,7 @@ do
 
         echo FIXMATCH+SVHN, ${SVHN_SEEDS[$seed]}, $ratio
         python ./main/run_FIXMATCH.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
-                                    --data tiny --server main --enable-wandb \
+                                    --data svhn --server main --enable-wandb \
                                     --n-label-per-class 50 \
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
