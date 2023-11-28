@@ -138,7 +138,12 @@ class Classification(Task):
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank)
         }
         
-        cls_wise_results = {i:torch.zeros(iteration) for i in range(10)} if self.backbone.class_num==6 else {i:torch.zeros(iteration) for i in range(100)}
+        if self.backbone.class_num==6:
+            cls_wise_results = {i:torch.zeros(iteration) for i in range(10)}
+        elif self.backbone.class_num==50:
+            cls_wise_results = {i:torch.zeros(iteration) for i in range(100)}
+        else:
+            cls_wise_results = {i:torch.zeros(iteration) for i in range(200)}
         
         with Progress(transient=True, auto_refresh=False) as pg:
 
