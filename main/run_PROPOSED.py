@@ -10,6 +10,7 @@ sys.path.append("./")
 from configs import ProposedConfig
 from datasets.cifar import CIFAR, load_CIFAR, CIFAR_STRONG
 from datasets.tiny import TinyImageNet ,load_tiny, TinyImageNet_STRONG
+from datasets.svhn import SVHN, load_SVHN, SVHN_STRONG
 from datasets.transforms import SemiAugment, TestAugment
 from models import WRN, densenet121, vgg16_bn, inceptionv4
 from tasks.classification_Proposed import Classification
@@ -139,6 +140,16 @@ def main_worker(local_rank: int, config: object):
         eval_set = TinyImageNet(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = TinyImageNet(data_name=config.data, dataset=datasets['test'], transform=test_trans)
         open_test_set = TinyImageNet(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
+    
+    elif config.data == 'svhn':
+        
+        datasets, _ = load_SVHN(root=config.root, data_name=config.data, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
+
+        labeled_set = SVHN(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
+        unlabeled_set = SVHN_STRONG(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
+        eval_set = SVHN(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
+        test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
+        open_test_set = SVHN(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
     
     else:
         raise NotImplementedError
