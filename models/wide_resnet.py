@@ -52,7 +52,7 @@ class residual(nn.Module):
 
 class WRN(nn.Module):
     """ WRN28-width with leaky relu (negative slope is 0.1)"""
-    def __init__(self, width, num_classes):
+    def __init__(self, width, num_classes, **kwargs):
         super().__init__()
 
         self.init_conv = conv3x3(3, 16)
@@ -73,7 +73,12 @@ class WRN(nn.Module):
 
         self.unit4 = nn.Sequential(*[BatchNorm2d(filters[3]), relu(), nn.AdaptiveAvgPool2d(1)])
 
-        self.output = nn.Linear(filters[3], num_classes, bias=False)
+        self.normalize = kwargs.get('normalize',False)
+
+        if self.normalize:
+            self.output = nn.Linear(filters[3], num_classes, bias=False)
+        else:
+            self.output = nn.Linear(filters[3], num_classes)
 
         self.class_num = num_classes
 
@@ -85,7 +90,8 @@ class WRN(nn.Module):
                 nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
                 nn.init.xavier_normal_(m.weight)
-                # nn.init.constant_(m.bias, 0)
+                if not self.normalize:
+                    nn.init.constant_(m.bias, 0)
 
     def forward(self, x, return_feature=False):
 
@@ -93,7 +99,7 @@ class WRN(nn.Module):
         x = self.unit1(x)
         x = self.unit2(x)
         x = self.unit3(x)
-        f = nn.functional.normalize(self.unit4(x))
+        f = nn.functional.normalize(self.unit4(x)) if self.normalize else self.unit4(x)
         c = self.output(f.squeeze())
         if return_feature:
             return [c, f]
@@ -117,7 +123,7 @@ class WRN(nn.Module):
         x = self.unit1(x)
         x = self.unit2(x)
         x = self.unit3(x)
-        f = self.unit4(x)
+        f = nn.functional.normalize(self.unit4(x)) if self.normalize else self.unit4(x)
         
         return f
 

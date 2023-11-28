@@ -56,7 +56,7 @@ def main_worker(local_rank: int, config: object):
 
     # Networks
     if config.backbone_type in ['wide28_10',"wide28_2"]:
-        model = WRN(width=int(config.backbone_type.split("_")[-1]), num_classes=num_classes)
+        model = WRN(width=int(config.backbone_type.split("_")[-1]), num_classes=num_classes, normalize=config.normalize)
     elif config.backbone_type == 'densenet121':
         model = densenet121(num_class=num_classes) 
     elif config.backbone_type == 'vgg16_bn':
