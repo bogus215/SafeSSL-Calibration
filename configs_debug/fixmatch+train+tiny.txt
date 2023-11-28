@@ -1,0 +1,12 @@
+--gpus=0
+--data=tiny
+--server=main
+--n-label-per-class=100
+--n-valid-per-class=50 
+--mismatch-ratio=0.30
+--tau=0.5
+--consis-coef=1
+--save-every=500
+--iterations=1000
+--n-bins=15
+--seed=2
