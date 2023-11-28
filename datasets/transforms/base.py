@@ -14,7 +14,7 @@ class ImageAugment(object):
         'cifar100':     [0.5071, 0.4867, 0.4408],
         'svhn':         [0.4359, 0.4420, 0.4709],
         'stl10':        [0.485,  0.456,  0.406],
-        'tiny':         [0.485,  0.456,  0.406],
+        'tiny':         [0.4807,  0.4485,  0.3979],
         'imagenet':     [0.485,  0.456,  0.406],
         'imagenet32':   [0.485,  0.456,  0.406]
     }
@@ -24,7 +24,7 @@ class ImageAugment(object):
         'cifar100':     [0.2675, 0.2565, 0.2761],
         'svhn':         [0.197, 0.200, 0.196],
         'stl10':        [0.229, 0.224, 0.225],
-        'tiny':         [0.229, 0.224, 0.225],
+        'tiny':         [0.2618, 0.2537, 0.2676],
         'imagenet':     [0.229, 0.224, 0.225],
         'imagenet32':   [0.229, 0.224, 0.225]
     }
@@ -33,6 +33,7 @@ class ImageAugment(object):
         'cifar10':      [True, True, True, True, True, False],
         'cifar100':     [True, True, True, True, True, False],
         'svhn':         [True, False, True, True, True, False],
+        'tiny':     [True, True, True, True, True, False],
     }
 
     def __init__(self,
