@@ -3,4 +3,5 @@ wandb
 checkpoints
 **/*gz
 datasets/cifar-10*
+datasets/tiny-*
 **/*mat
