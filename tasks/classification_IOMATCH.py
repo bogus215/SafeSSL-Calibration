@@ -161,12 +161,12 @@ class Classification(Task):
                     unlabel_weak_x, unlabel_strong_x = u_batch['weak_img'].to(self.local_rank), u_batch['strong_img'].to(self.local_rank)
                     unlabel_y = u_batch['y'].to(self.local_rank)
 
-                    outputs = self.predict(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
+                    outputs = self.iomatch_predict(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
 
                     logits_x_lb = outputs['logits'][:label_x.size(0)]
                     logits_mb_x_lb = outputs['logits_mb'][:label_x.size(0)]
                     logits_x_ulb_w, logits_x_ulb_s = outputs['logits'][label_x.size(0):].chunk(2)
-                    logits_open_x_ulb_w, logits_open_x_ulb_s = outputs['logits_open'][label_x.size(0):].chunk(2)
+                    _, logits_open_x_ulb_s = outputs['logits_open'][label_x.size(0):].chunk(2)
                     logits_mb_x_ulb_w, _ = outputs['logits_mb'][label_x.size(0):].chunk(2)
 
                     # supervised losses
@@ -242,7 +242,7 @@ class Classification(Task):
 
         return {k: v.mean().item() for k, v in result.items()}, cls_wise_results, label_iterator, unlabel_iterator
     
-    def predict(self, x: torch.FloatTensor):
+    def iomatch_predict(self, x: torch.FloatTensor):
 
         logits, feat = self.get_feature(x)
         feat_proj = self.backbone.mlp_proj(feat.squeeze())
