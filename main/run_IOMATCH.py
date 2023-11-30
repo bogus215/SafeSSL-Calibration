@@ -160,6 +160,7 @@ def main_worker(local_rank: int, config: object):
         warm_up_end=config.warm_up,
         n_bins=config.n_bins,
         enable_plot=config.enable_plot,
+        dist_da_len=config.dist_da_len,
         logger=logger
     )
     elapsed_sec = time.time() - start
