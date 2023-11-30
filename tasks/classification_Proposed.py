@@ -79,7 +79,7 @@ class Classification(Task):
             train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, pi=pi, consis_coef=consis_coef, cali_coef=cali_coef, entropy_coef=entropy_coef, smoothing_proposed=None if epoch==1 else ece_results, n_bins=n_bins)
             eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
             try:
-                if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
+                if self.ckpt_dir.split("/")[2] in ['cifar10','svhn'] and enable_plot:
                     label_preds, label_trues, label_FEATURE, label_CLS_LOSS, label_IDX = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
                     self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE, label_CLS_LOSS, label_IDX])
                     self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
