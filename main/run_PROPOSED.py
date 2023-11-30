@@ -12,9 +12,12 @@ from datasets.cifar import CIFAR, load_CIFAR, CIFAR_STRONG
 from datasets.tiny import TinyImageNet ,load_tiny, TinyImageNet_STRONG
 from datasets.svhn import SVHN, load_SVHN, SVHN_STRONG
 from datasets.transforms import SemiAugment, TestAugment
+
 from models import WRN, densenet121, vgg16_bn, inceptionv4
 from tasks.classification_Proposed import Classification
+
 from utils.logging import get_rich_logger
+from utils.initialization import initialize_weights
 from utils.wandb import configure_wandb
 from utils.gpu import set_gpu
 
@@ -116,6 +119,8 @@ def main_worker(local_rank: int, config: object):
     setattr(model,'temperature', nn.Parameter(torch.ones(1) * 1.5))
     setattr(model,'reverse', GradientReversalLayer())
 
+    initialize_weights(model)
+    
     # Data (transforms & datasets)
     trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
     train_trans = AUGMENTS[config.train_augment](**trans_kwargs)

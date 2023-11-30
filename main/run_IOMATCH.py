@@ -12,9 +12,12 @@ from datasets.cifar import CIFAR, load_CIFAR, CIFAR_STRONG
 from datasets.tiny import TinyImageNet, load_tiny, TinyImageNet_STRONG
 from datasets.svhn import SVHN, load_SVHN, SVHN_STRONG
 from datasets.transforms import SemiAugment, TestAugment
+
 from models import WRN, densenet121, vgg16_bn, inceptionv4
 from tasks.classification_IOMATCH import Classification
+
 from utils.logging import get_rich_logger
+from utils.initialization import initialize_weights
 from utils.wandb import configure_wandb
 from utils.gpu import set_gpu
 
@@ -86,6 +89,8 @@ def main_worker(local_rank: int, config: object):
     setattr(model,'mb_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2)))
     setattr(model,'openset_classifier', nn.Linear(model.output.in_features,int(model.class_num+1)))
 
+    initialize_weights(model)
+    
     # Data (transforms & datasets)
     trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
     train_trans = AUGMENTS[config.train_augment](**trans_kwargs)
