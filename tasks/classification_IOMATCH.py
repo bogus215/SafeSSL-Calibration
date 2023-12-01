@@ -276,32 +276,6 @@ class Classification(Task):
         l_ova_sup = open_loss_neg + open_loss
         return l_ova_sup   
 
-    @staticmethod
-    def consistency_loss(logits, targets, name='ce', mask=None):
-        """
-        wrapper for consistency regularization loss in semi-supervised learning.
-
-        Args:
-            logits: logit to calculate the loss on and back-propagion, usually being the strong-augmented unlabeled samples
-            targets: pseudo-labels (either hard label or soft label)
-            name: use cross-entropy ('ce') or mean-squared-error ('mse') to calculate loss
-            mask: masks to mask-out samples when calculating the loss, usually being used as confidence-masking-out
-        """
-
-        assert name in ['ce', 'mse']
-        # logits_w = logits_w.detach()
-        if name == 'mse':
-            probs = torch.softmax(logits, dim=-1)
-            loss = nn.functional.mse_loss(probs, targets, reduction='none').mean(dim=1)
-        else:
-            loss = self.loss_function(logits, targets, reduction='none')
-
-        if mask is not None:
-            # mask must not be boolean type
-            loss = loss * mask
-
-        return loss.mean()
-    
 class DistAlignQueueHook:
     """
     Distribution Alignment Hook for conducting distribution alignment
