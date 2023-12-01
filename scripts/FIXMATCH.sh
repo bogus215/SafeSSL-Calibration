@@ -15,7 +15,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --warm-up 1
+                                    --weight-decay 0
 
         echo FIXMATCH+CIFAR100, ${CIFAR100_SEEDS[$seed]}, $ratio
         python ./main/run_FIXMATCH.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
@@ -25,7 +25,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --warm-up 1
+                                    --weight-decay 0
 
         echo FIXMATCH+TINY, ${TINY_SEEDS[$seed]}, $ratio
         python ./main/run_FIXMATCH.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
@@ -35,7 +35,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --warm-up 1
+                                    --weight-decay 0
 
         echo FIXMATCH+SVHN, ${SVHN_SEEDS[$seed]}, $ratio
         python ./main/run_FIXMATCH.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
@@ -44,6 +44,6 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --warm-up 1
+                                    --weight-decay 0
     done
 done
