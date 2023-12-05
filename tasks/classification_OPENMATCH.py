@@ -37,8 +37,11 @@ class Classification(Task):
         if not self.prepared:
             raise RuntimeError("Training not prepared.")
 
-        # DataLoader (train, val, test)
+        # DataLoader
         unlabel_loader = DataLoader(train_set[1],batch_size=self.batch_size//2,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
+
+        sampler = RandomSampler(len(train_set[0]), len(unlabel_loader) * self.batch_size // 2)
+        l_loader = DataLoader(train_set[0],batch_size=self.batch_size//2, sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
         
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
@@ -51,8 +54,8 @@ class Classification(Task):
         best_eval_acc = -float('inf')
         best_epoch    = 0
 
-        epochs = self.iterations // round(len(train_set[1])/(self.batch_size//2))
-        if (self.iterations % round(len(train_set[1])/(self.batch_size//2))) != 0:
+        epochs = self.iterations // len(unlabel_loader)
+        if (self.iterations % len(unlabel_loader)) != 0:
             epochs += 1
         
         self.warm_up_end = warm_up_end
@@ -61,17 +64,14 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_unlabeled_dataset=train_set[2],start_fix=start_fix,current_epoch=epoch)
+            self.exclude_dataset(unlabeled_loader=unlabel_loader,selected_unlabeled_dataset=train_set[2],start_fix=start_fix,current_epoch=epoch)
             
             # Train & evaluate
-            ## labeled
-            sampler = RandomSampler(len(train_set[0]), (round(len(train_set[1])/(self.batch_size//2))) * self.batch_size // 2)
-            l_loader = DataLoader(train_set[0],batch_size=self.batch_size//2, sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
-
             ## selected unlabeled
-            sampler = RandomSampler(len(train_set[2]), (round(len(train_set[1])/(self.batch_size//2))) * self.batch_size // 2)
+            sampler = RandomSampler(len(train_set[2]), len(unlabel_loader) * self.batch_size // 2)
             selected_u_loader = DataLoader(train_set[2],batch_size=self.batch_size//2, sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
             
+            assert len(l_loader)==len(unlabel_loader)==len(selected_u_loader), "Loader problems ... "
             train_history, cls_wise_results = self.train(l_loader, unlabel_loader, selected_u_loader, current_epoch=epoch,start_fix=start_fix, p_cutoff=p_cutoff, n_bins=n_bins, lambda_em=lambda_em,lambda_socr=lambda_socr)
             eval_history = self.evaluate(eval_loader, n_bins)
             if enable_plot:
@@ -124,20 +124,15 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def exclude_dataset(self, unlabeled_dataset, selected_unlabeled_dataset,start_fix,current_epoch):
-        loader = DataLoader(dataset=unlabeled_dataset,
-                            batch_size=self.batch_size//2,
-                            drop_last=False,
-                            shuffle=False,
-                            num_workers=self.num_workers)
+    def exclude_dataset(self, unlabeled_loader, selected_unlabeled_dataset,start_fix,current_epoch):
 
         self._set_learning_phase(train=False)
         
         with torch.no_grad():
             with Progress(transient=True, auto_refresh=False) as pg:
                 if self.local_rank == 0:
-                    task = pg.add_task(f"[bold red] Extracting...", total=len(loader))
-                for batch_idx, data in enumerate(loader):
+                    task = pg.add_task(f"[bold red] Extracting...", total=len(unlabeled_loader))
+                for batch_idx, data in enumerate(unlabeled_loader):
                     x = data['x_ulb_w_0']
                     y = data['y_ulb']
 
@@ -164,7 +159,7 @@ class Classification(Task):
                         gt_all = torch.cat([gt_all, gt_idx], 0)
                         
                     if self.local_rank == 0:
-                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
+                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(unlabeled_loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
