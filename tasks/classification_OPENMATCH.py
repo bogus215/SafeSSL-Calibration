@@ -75,13 +75,8 @@ class Classification(Task):
             
             train_history, cls_wise_results = self.train(l_loader, unlabel_loader, selected_u_loader, current_epoch=epoch,start_fix=start_fix, p_cutoff=p_cutoff, n_bins=n_bins, lambda_em=lambda_em,lambda_socr=lambda_socr)
             eval_history = self.evaluate(eval_loader, n_bins)
-            try:
-                if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
-                    label_preds, label_trues, label_FEATURE = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
-                    self.log_plot_history(data_loader=unlabel_loader, time=self.trained_iteration, name="unlabel", get_results=[label_preds, label_trues, label_FEATURE])
-                    self.log_plot_history(data_loader=open_test_loader, time=self.trained_iteration, name="open+test")
-            except:
-                pass
+            if enable_plot:
+                raise NotImplementedError
 
             epoch_history = collections.defaultdict(dict)
             for k, v1 in train_history.items():
@@ -253,19 +248,20 @@ class Classification(Task):
                 self.trained_iteration+=1
 
                 result['loss'][i] = loss.detach()
-                result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb, y_lb).detach()
-                result['ece'][i] = self.get_ece(preds=logits_x_lb.softmax(dim=1).detach().cpu().numpy(), targets=y_lb.cpu().numpy(), n_bins=n_bins, plot=False)[0]
-                if used_unlabeled_index.sum().item() != 0:
-                    result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(logits_x_ulb_w[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
-                    result['unlabeled_ece'][i] = self.get_ece(preds=logits_x_ulb_w[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
-                                                              targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
-                result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
+                result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb.chunk(2)[0], y_lb).detach()
+                result['ece'][i] = self.get_ece(preds=logits_x_lb.chunk(2)[0].softmax(dim=1).detach().cpu().numpy(), targets=y_lb.cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                if current_epoch >= start_fix:
+                    if used_unlabeled_index.sum().item() != 0:
+                        result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(logits_x_ulb_w[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
+                        result['unlabeled_ece'][i] = self.get_ece(preds=logits_x_ulb_w[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
+                                                                targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
+                    result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
 
-                unique, counts = np.unique(unlabel_y[used_unlabeled_index].cpu().numpy(), return_counts = True)
-                uniq_cnt_dict = dict(zip(unique, counts))
-                
-                for key,value in uniq_cnt_dict.items():
-                    cls_wise_results[key][i] = value
+                    unique, counts = np.unique(unlabel_y[used_unlabeled_index].cpu().numpy(), return_counts = True)
+                    uniq_cnt_dict = dict(zip(unique, counts))
+                    
+                    for key,value in uniq_cnt_dict.items():
+                        cls_wise_results[key][i] = value
 
                 if self.local_rank == 0:
                     desc = f"[bold green] [{i+1}/{iteration}]: "
