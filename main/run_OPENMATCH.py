@@ -110,7 +110,7 @@ def main_worker(local_rank: int, config: object):
         
         datasets, _ = load_tiny(root=config.root, n_label_per_class=config.n_label_per_class,n_valid_per_class=config.n_valid_per_class,mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
 
-        labeled_set = TINY_TWO_AUG(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
+        labeled_set = TINY_TWO_AUG(data_name=config.data, dataset=datasets['l_train'], transform=train_trans, name='train_lb')
 
         unlabeled_set = TINY_TWO_AUG(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
         unlabeled_selected_set = TINY_TWO_AUG(data_name=config.data, dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)

@@ -1,0 +1,11 @@
+--gpus=3
+--seed=1
+--data=svhn
+--server=workstation1
+--n-label-per-class=50
+--enable-wandb
+--mismatch-ratio=0.30
+--mixed-precision
+--save-every=5000
+--n-bins=15
+--start-fix=10
