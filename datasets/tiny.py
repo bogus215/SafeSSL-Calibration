@@ -223,8 +223,8 @@ class TINY_TWO_AUG(Dataset):
 
     def set_index(self, indices=None):
         if indices is not None:
-            self.data_index = self.data[indices]
-            self.targets_index = self.targets[indices]
+            self.data_index = self.data[indices.cpu()]
+            self.targets_index = list(np.array(self.targets)[indices.cpu()])
         else:
             self.data_index = self.data
             self.targets_index = self.targets
