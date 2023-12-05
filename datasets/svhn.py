@@ -181,8 +181,8 @@ class SVHN_TWO_AUG(Dataset):
                  **kwargs):
 
         self.data_name = data_name
-        self.data = dataset['images']
-        self.targets = dataset['labels']
+        self.data = deepcopy(dataset['images'])
+        self.targets = deepcopy(dataset['labels'])
         self.transform = transform
         self.name = name
         self.set_index()
@@ -196,10 +196,8 @@ class SVHN_TWO_AUG(Dataset):
             self.targets_index = self.targets
 
     def __sample__(self, idx):
-        if self.targets is None:
-            target = None
-        else:
-            target = self.targets_index[idx]
+
+        target = self.targets_index[idx]
         img = self.data_index[idx]
 
         return img, target

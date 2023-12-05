@@ -94,8 +94,9 @@ class Classification(Task):
                 if self.scheduler is not None:
                     lr = self.scheduler.get_last_lr()[0]
                     self.writer.add_scalar('lr', lr, global_step=epoch)
-                self.writer.add_scalar("trained_unlabeled_data_in", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key<self.backbone.class_num]).item() , global_step=epoch)
-                self.writer.add_scalar("trained_unlabeled_data_ood", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key>=self.backbone.class_num]).item() , global_step=epoch)
+                if cls_wise_results is not None:
+                    self.writer.add_scalar("trained_unlabeled_data_in", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key<self.backbone.class_num]).item() , global_step=epoch)
+                    self.writer.add_scalar("trained_unlabeled_data_ood", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key>=self.backbone.class_num]).item() , global_step=epoch)
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
@@ -133,31 +134,39 @@ class Classification(Task):
         self._set_learning_phase(train=False)
         
         with torch.no_grad():
-            for batch_idx, data in enumerate(loader):
-                x = data['x_ulb_w_0']
-                y = data['y_ulb']
+            with Progress(transient=True, auto_refresh=False) as pg:
+                if self.local_rank == 0:
+                    task = pg.add_task(f"[bold red] Extracting...", total=len(loader))
+                for batch_idx, data in enumerate(loader):
+                    x = data['x_ulb_w_0']
+                    y = data['y_ulb']
 
-                if isinstance(x, dict):
-                    x = {k: v.cuda(self.local_rank) for k, v in x.items()}
-                else:
-                    x = x.cuda(self.local_rank)
-                y = y.cuda(self.local_rank)
+                    if isinstance(x, dict):
+                        x = {k: v.cuda(self.local_rank) for k, v in x.items()}
+                    else:
+                        x = x.cuda(self.local_rank)
+                    y = y.cuda(self.local_rank)
 
-                outputs = self.openmatch_predict(x)
-                logits, logits_open = outputs['logits'], outputs['logits_open']
-                logits = nn.functional.softmax(logits, 1)
-                logits_open = nn.functional.softmax(logits_open.view(logits_open.size(0), 2, -1), 1)
-                tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
-                pred_close = logits.data.max(1)[1]
-                unk_score = logits_open[tmp_range, 0, pred_close]
-                select_idx = unk_score < 0.5
-                gt_idx = y < self.backbone.class_num
-                if batch_idx == 0:
-                    select_all = select_idx
-                    gt_all = gt_idx
-                else:
-                    select_all = torch.cat([select_all, select_idx], 0)
-                    gt_all = torch.cat([gt_all, gt_idx], 0)
+                    outputs = self.openmatch_predict(x)
+                    logits, logits_open = outputs['logits'], outputs['logits_open']
+                    logits = nn.functional.softmax(logits, 1)
+                    logits_open = nn.functional.softmax(logits_open.view(logits_open.size(0), 2, -1), 1)
+                    tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
+                    pred_close = logits.data.max(1)[1]
+                    unk_score = logits_open[tmp_range, 0, pred_close]
+                    select_idx = unk_score < 0.5
+                    gt_idx = y < self.backbone.class_num
+                    if batch_idx == 0:
+                        select_all = select_idx
+                        gt_all = gt_idx
+                    else:
+                        select_all = torch.cat([select_all, select_idx], 0)
+                        gt_all = torch.cat([gt_all, gt_idx], 0)
+                        
+                    if self.local_rank == 0:
+                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
+                        pg.update(task, advance=1., description=desc)
+                        pg.refresh()
 
         select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
@@ -226,7 +235,7 @@ class Classification(Task):
                     fix_loss = torch.tensor(0).cuda(self.local_rank)
                     if current_epoch >= start_fix:
                         inputs_selected = torch.cat((x_ulb_w, x_ulb_s), 0)
-                        outputs_selected = self.model(inputs_selected)
+                        outputs_selected = self.openmatch_predict(inputs_selected)
                         logits_x_ulb_w, logits_x_ulb_s = outputs_selected['logits'].chunk(2)
 
                         unlabel_confidence, unlabel_pseudo_y = logits_x_ulb_w.softmax(1).max(1)
@@ -273,7 +282,10 @@ class Classification(Task):
                 if self.scheduler is not None:
                     self.scheduler.step()
 
-        return {k: v.mean().item() for k, v in result.items()}, cls_wise_results
+        if current_epoch >= start_fix:
+            return {k: v.mean().item() for k, v in result.items()}, cls_wise_results
+        else:
+            return {k: v.mean().item() for k, v in result.items()}, None
     
     def openmatch_predict(self, x: torch.FloatTensor):
 
