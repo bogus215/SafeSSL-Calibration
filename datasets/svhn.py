@@ -179,8 +179,8 @@ class Selcted_DATA(Dataset):
                  transform: object = None,
                  **kwargs):
 
-        self.data = dataset['images']
-        self.targets = dataset['labels']
+        self.data = deepcopy(dataset['images'])
+        self.targets = deepcopy(dataset['labels'])
         self.transform = transform
         self.name = name
 
