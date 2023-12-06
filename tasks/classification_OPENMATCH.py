@@ -58,9 +58,6 @@ class Classification(Task):
         if (self.iterations % len(unlabel_loader)) != 0:
             epochs += 1
         
-        self.warm_up_end = warm_up_end
-        self.trained_iteration = 0
-
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
@@ -133,14 +130,9 @@ class Classification(Task):
                 if self.local_rank == 0:
                     task = pg.add_task(f"[bold red] Extracting...", total=len(unlabeled_loader))
                 for batch_idx, data in enumerate(unlabeled_loader):
-                    x = data['x_ulb_w_0']
-                    y = data['y_ulb']
 
-                    if isinstance(x, dict):
-                        x = {k: v.cuda(self.local_rank) for k, v in x.items()}
-                    else:
-                        x = x.cuda(self.local_rank)
-                    y = y.cuda(self.local_rank)
+                    x = data['x_ulb_w_0'].cuda(self.local_rank)
+                    y = data['y_ulb'].cuda(self.local_rank)
 
                     outputs = self.openmatch_predict(x)
                     logits, logits_open = outputs['logits'], outputs['logits_open']
@@ -203,17 +195,33 @@ class Classification(Task):
         else:
             cls_wise_results = {i:torch.zeros(iteration) for i in range(200)}
         
+        label_iterator = iter(label_loader)
+        unlabel_iterator = iter(unlabel_loader)
+        selected_unlabel_iterator = iter(selected_unlabel_loader)
+        
         with Progress(transient=True, auto_refresh=False) as pg:
 
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Training...", total=iteration)
 
-            for i, (data_lb, data_ulb, data_ulb_selected) in enumerate(zip(label_loader, unlabel_loader, selected_unlabel_loader)):
+            for i in range(iteration):
                 with torch.cuda.amp.autocast(self.mixed_precision):
 
-                    #  x_ulb_w_0 and x_ulb_w_1 are all unlabeled data for training ova_classifiers
-                    #  x_ulb_w and x_ulb_s are selected for FixMatch training
-                    x_lb_w_0, x_lb_w_1, y_lb, x_ulb_w_0, x_ulb_w_1, x_ulb_w, x_ulb_s, unlabel_y = data_lb["x_lb_w_0"].to(self.local_rank), data_lb["x_lb_w_1"].to(self.local_rank), data_lb["y_lb"].to(self.local_rank), data_ulb["x_ulb_w_0"].to(self.local_rank), data_ulb["x_ulb_w_1"].to(self.local_rank), data_ulb_selected["x_ulb_w"].to(self.local_rank), data_ulb_selected["x_ulb_s"].to(self.local_rank), data_ulb_selected["unlabel_y"].to(self.local_rank)
+                    data_lb = next(label_iterator)
+                    data_ulb = next(unlabel_iterator)
+                    data_ulb_selected = next(selected_unlabel_iterator)
+                    
+                    x_lb_w_0 = data_lb["x_lb_w_0"].to(self.local_rank)
+                    x_lb_w_1 = data_lb["x_lb_w_1"].to(self.local_rank)
+                    y_lb = data_lb["y_lb"].to(self.local_rank) 
+
+                    x_ulb_w_0  = data_ulb["x_ulb_w_0"].to(self.local_rank)
+                    x_ulb_w_1 = data_ulb["x_ulb_w_1"].to(self.local_rank)
+
+                    x_ulb_w = data_ulb_selected["x_ulb_w"].to(self.local_rank)
+                    x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
+                    unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
+
                     num_lb = y_lb.shape[0]
 
                     inputs = torch.cat((x_lb_w_0, x_lb_w_1, x_ulb_w_0, x_ulb_w_1))
@@ -248,7 +256,6 @@ class Classification(Task):
                     loss.backward()
                     self.optimizer.step()
                 self.optimizer.zero_grad()
-                self.trained_iteration+=1
 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb.chunk(2)[0], y_lb).detach()
