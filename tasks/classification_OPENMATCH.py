@@ -68,7 +68,7 @@ class Classification(Task):
             
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
-            selected_u_loader = DataLoader(u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
+            selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
             train_history, cls_wise_results = self.train(l_loader, unlabel_loader, selected_u_loader, current_epoch=epoch,start_fix=start_fix, p_cutoff=p_cutoff, n_bins=n_bins, lambda_em=lambda_em,lambda_socr=lambda_socr)
             eval_history = self.evaluate(eval_loader, n_bins)
@@ -202,21 +202,13 @@ class Classification(Task):
         else:
             cls_wise_results = {i:torch.zeros(iteration) for i in range(200)}
         
-        label_iterator = iter(label_loader)
-        unlabel_iterator = iter(unlabel_loader)
-        selected_unlabel_iterator = iter(selected_unlabel_loader)
-        
         with Progress(transient=True, auto_refresh=False) as pg:
 
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Training...", total=iteration)
 
-            for i in range(iteration):
+            for i, (data_lb, data_ulb, data_ulb_selected) in enumerate(zip(label_loader, unlabel_loader, selected_unlabel_loader)):
                 with torch.cuda.amp.autocast(self.mixed_precision):
-
-                    data_lb = next(label_iterator)
-                    data_ulb = next(unlabel_iterator)
-                    data_ulb_selected = next(selected_unlabel_iterator)
 
                     x_lb_w_0 = data_lb["x_lb_w_0"].to(self.local_rank)
                     x_lb_w_1 = data_lb["x_lb_w_1"].to(self.local_rank)
