@@ -269,7 +269,7 @@ class OPENMATCHConfig(ConfigBase):
         parser.add_argument('--p-cutoff', type=float, default=0.95)
         parser.add_argument('--lambda-em', type=float, default=0.1)
         parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
-        parser.add_argument('--start-fix', type=int, default=10)
+        parser.add_argument('--start-fix', type=int, default=5)
 
         return parser
 

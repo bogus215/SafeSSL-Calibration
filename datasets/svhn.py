@@ -183,10 +183,34 @@ class Selcted_DATA(Dataset):
         self.targets = deepcopy(dataset['labels'])
         self.transform = transform
         self.name = name
+        
+        self.data_index = None
+        self.targets_index = None
+        self.set_index()
+
+    def set_index(self, indices=None):
+        if indices is not None:
+            self.data_index = self.data[indices.cpu()]
+            self.targets_index = np.array(self.targets)[indices.cpu()].tolist()
+        else:
+            self.data_index = self.data
+            self.targets_index = self.targets
+            
+    def __len__(self):
+        return len(self.data_index)
+
+    def __sample__(self, idx):
+        if self.targets is None:
+            target = None
+        else:
+            target = self.targets_index[idx]
+        img = self.data_index[idx]
+
+        return img, target
 
     def __getitem__(self, idx):
         
-        img, target = self.data[idx], self.targets[idx]
+        img, target = self.__sample__(idx)
         if self.transform is not None:
             weak_img = self.transform(img)
 
@@ -198,6 +222,3 @@ class Selcted_DATA(Dataset):
             return {'x_ulb_w': weak_img, 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
         else:
             raise ValueError
-
-    def __len__(self):
-        return len(self.targets)

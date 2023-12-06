@@ -1,19 +1,18 @@
 import collections
-import math
 import os
-import numpy as np
 
+import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from rich.progress import Progress
+from sklearn.metrics import accuracy_score, precision_score, recall_score
 from torch.utils.data import DataLoader
-from datasets.svhn import Selcted_DATA
+from torch.utils.data.sampler import Sampler
 
 from tasks.classification import Classification as Task
-from utils import RandomSampler, TopKAccuracy
+from utils import TopKAccuracy
 from utils.logging import make_epoch_description
-
-from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 
 class Classification(Task):
@@ -27,6 +26,7 @@ class Classification(Task):
             open_test_set,
             p_cutoff,
             warm_up_end,
+            save_every,
             n_bins,
             start_fix,
             lambda_em,
@@ -40,12 +40,17 @@ class Classification(Task):
             raise RuntimeError("Training not prepared.")
 
         # DataLoader
-        unlabel_loader = DataLoader(train_set[1],batch_size=self.batch_size//2,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
+        epochs = self.iterations // save_every
+        per_epoch_steps = self.iterations // epochs
+        num_samples = per_epoch_steps * self.batch_size // 2 
 
-        sampler = RandomSampler(len(train_set[0]), len(unlabel_loader) * self.batch_size // 2)
-        l_loader = DataLoader(train_set[0],batch_size=self.batch_size//2, sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
-        
-        eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
+        l_sampler = DistributedSampler(dataset=train_set[0], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
+        l_loader = DataLoader(train_set[0],batch_size=self.batch_size//2, sampler=l_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
+
+        u_sampler = DistributedSampler(dataset=train_set[1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
+        unlabel_loader = DataLoader(train_set[1],batch_size=self.batch_size//2, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
+
+        eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         # Logging
@@ -56,17 +61,15 @@ class Classification(Task):
         best_eval_acc = -float('inf')
         best_epoch    = 0
 
-        epochs = self.iterations // len(unlabel_loader)
-        if (self.iterations % len(unlabel_loader)) != 0:
-            epochs += 1
-        
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            selcted_u_data = self.exclude_dataset(unlabeled_loader=unlabel_loader,start_fix=start_fix,current_epoch=epoch,transform=train_trans)
+            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_fix,current_epoch=epoch,transform=train_trans)
             
             # Train & evaluate
-            selected_u_loader = DataLoader(selcted_u_data,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=True,shuffle=True)
+            u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
+            selected_u_loader = DataLoader(u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
+
             train_history, cls_wise_results = self.train(l_loader, unlabel_loader, selected_u_loader, current_epoch=epoch,start_fix=start_fix, p_cutoff=p_cutoff, n_bins=n_bins, lambda_em=lambda_em,lambda_socr=lambda_socr)
             eval_history = self.evaluate(eval_loader, n_bins)
             if enable_plot:
@@ -119,15 +122,21 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def exclude_dataset(self,unlabeled_loader,start_fix,current_epoch,transform):
+    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch,transform):
+
+        loader = DataLoader(dataset=unlabeled_dataset,
+                            batch_size=128,
+                            drop_last=False,
+                            shuffle=False,
+                            num_workers=4)
 
         self._set_learning_phase(train=False)
         
         with torch.no_grad():
             with Progress(transient=True, auto_refresh=False) as pg:
                 if self.local_rank == 0:
-                    task = pg.add_task(f"[bold red] Extracting...", total=len(unlabeled_loader))
-                for batch_idx, data in enumerate(unlabeled_loader):
+                    task = pg.add_task(f"[bold red] Extracting...", total=len(loader))
+                for batch_idx, data in enumerate(loader):
 
                     x = data['x_ulb_w_0'].cuda(self.local_rank)
                     y = data['y_ulb'].cuda(self.local_rank)
@@ -149,7 +158,7 @@ class Classification(Task):
                         gt_all = torch.cat([gt_all, gt_idx], 0)
                         
                     if self.local_rank == 0:
-                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(unlabeled_loader)}] "
+                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
@@ -169,11 +178,7 @@ class Classification(Task):
         self._set_learning_phase(train=True)
         if current_epoch >= start_fix:
             if len(selected_idx) > 0:
-                return Selcted_DATA(dataset={"images":unlabeled_loader.dataset.data[selected_idx.cpu()],"labels":list(np.array(unlabeled_loader.dataset.targets)[selected_idx.cpu()])},name='train_ulb_selected', transform=transform)
-            else:
-                return Selcted_DATA(dataset={"images":unlabeled_loader.dataset.data,"labels":unlabeled_loader.dataset.targets},name='train_ulb_selected', transform=transform)
-        else:
-            return Selcted_DATA(dataset={"images":unlabeled_loader.dataset.data,"labels":unlabeled_loader.dataset.targets},name='train_ulb_selected', transform=transform)
+                selected_dataset.set_index(selected_idx)
 
     def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, p_cutoff, n_bins, lambda_em,lambda_socr):
         """Training defined for a single epoch."""
@@ -211,11 +216,7 @@ class Classification(Task):
 
                     data_lb = next(label_iterator)
                     data_ulb = next(unlabel_iterator)
-                    try:
-                        data_ulb_selected = next(selected_unlabel_iterator)
-                    except:
-                        selected_unlabel_iterator = iter(selected_unlabel_loader)
-                        data_ulb_selected = next(selected_unlabel_iterator)
+                    data_ulb_selected = next(selected_unlabel_iterator)
 
                     x_lb_w_0 = data_lb["x_lb_w_0"].to(self.local_rank)
                     x_lb_w_1 = data_lb["x_lb_w_1"].to(self.local_rank)
@@ -357,3 +358,74 @@ def socr_loss_func(logits_open_u1, logits_open_u2):
     l_socr = torch.mean(torch.sum(torch.sum(torch.abs(
         logits_open_u1 - logits_open_u2) ** 2, 1), 1))
     return l_socr
+
+class DistributedSampler(Sampler):
+    """Sampler that restricts data loading to a subset of the dataset.
+
+    It is especially useful in conjunction with
+    :class:`torch.nn.parallel.DistributedDataParallel`. In such case, each
+    process can pass a DistributedSampler instance as a DataLoader sampler,
+    and load a subset of the original dataset that is exclusive to it.
+
+    .. note::
+        Dataset is assumed to be of constant size.
+
+    Arguments:
+        dataset: Dataset used for sampling.
+        num_replicas (optional): Number of processes participating in
+            distributed training.
+        rank (optional): Rank of the current process within num_replicas.
+    """
+
+    def __init__(self, dataset, num_replicas=None, rank=None, num_samples=None):
+
+
+        if not isinstance(num_samples, int) or num_samples <= 0:
+            raise ValueError("num_samples should be a positive integeral "
+                             "value, but got num_samples={}".format(num_samples))
+
+        if num_replicas is None:
+            if not dist.is_available():
+                raise RuntimeError("Requires distributed package to be available")
+            else:
+                num_replicas = dist.get_world_size()
+        if rank is None:
+            if not dist.is_available():
+                raise RuntimeError("Requires distributed package to be available")
+            else:
+                rank = dist.get_rank()
+        self.dataset = dataset
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.epoch = 0
+
+        self.total_size = num_samples
+        assert num_samples % self.num_replicas == 0, f'{num_samples} samples cant' \
+                                                     f'be evenly distributed among {num_replicas} devices.'
+        self.num_samples = int(num_samples // self.num_replicas)
+
+    def __iter__(self):
+        # deterministically shuffle based on epoch
+        g = torch.Generator()
+        g.manual_seed(self.epoch)
+
+        n = len(self.dataset)
+        n_repeats = self.total_size // n
+        n_remain = self.total_size % n
+        indices = [torch.randperm(n, generator=g) for _ in range(n_repeats)]
+        indices.append(torch.randperm(n, generator=g)[:n_remain])
+        indices = torch.cat(indices, dim=0).tolist()
+
+        assert len(indices) == self.total_size
+
+        # subsample
+        indices = indices[self.rank:self.total_size:self.num_replicas]
+        assert len(indices) == self.num_samples
+
+        return iter(indices)
+
+    def __len__(self):
+        return self.num_samples
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch

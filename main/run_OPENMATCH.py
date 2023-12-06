@@ -9,17 +9,15 @@ import torch
 sys.path.append("./")
 from configs import OPENMATCHConfig
 from datasets.cifar import CIFAR, load_CIFAR
+from datasets.svhn import SVHN, Selcted_DATA, load_SVHN
 from datasets.tiny import TinyImageNet, load_tiny
-from datasets.svhn import SVHN, load_SVHN, Selcted_DATA
 from datasets.transforms import SemiAugment, TestAugment
-
-from models import WRN, densenet121, vgg16_bn, inceptionv4
+from models import WRN, densenet121, inceptionv4, vgg16_bn
 from tasks.classification_OPENMATCH import Classification
-
-from utils.logging import get_rich_logger
-from utils.initialization import initialize_weights
-from utils.wandb import configure_wandb
 from utils.gpu import set_gpu
+from utils.initialization import initialize_weights
+from utils.logging import get_rich_logger
+from utils.wandb import configure_wandb
 
 NUM_CLASSES = {
     'cifar10': 6,
@@ -99,6 +97,7 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
         unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
+        selcted_unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
 
         eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -110,7 +109,8 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
         unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-
+        selcted_unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+        
         eval_set = TinyImageNet(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = TinyImageNet(data_name=config.data, dataset=datasets['test'], transform=test_trans)
         open_test_set = TinyImageNet(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
@@ -121,6 +121,7 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA(data_name=config.data, dataset=datasets['l_train'], name='train_lb',transform=train_trans)
         unlabeled_set = Selcted_DATA(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
+        selcted_unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
 
         eval_set = SVHN(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -155,7 +156,7 @@ def main_worker(local_rank: int, config: object):
     # Train & evaluate
     start = time.time()
     model.run(
-        train_set=[labeled_set,unlabeled_set],
+        train_set=[labeled_set,unlabeled_set,selcted_unlabeled_set],
         eval_set=eval_set,
         test_set=test_set,
         open_test_set=open_test_set,
@@ -165,6 +166,7 @@ def main_worker(local_rank: int, config: object):
         start_fix=config.start_fix,
         lambda_em=config.lambda_em,
         lambda_socr=config.lambda_socr,
+        save_every=config.save_every,
         train_trans=train_trans,
         enable_plot=config.enable_plot,
         logger=logger
