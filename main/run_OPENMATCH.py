@@ -8,9 +8,9 @@ import torch
 
 sys.path.append("./")
 from configs import OPENMATCHConfig
-from datasets.cifar import CIFAR, CIFAR_TWO_AUG, load_CIFAR
-from datasets.tiny import TinyImageNet, TINY_TWO_AUG, load_tiny
-from datasets.svhn import SVHN, SVHN_TWO_AUG, load_SVHN
+from datasets.cifar import CIFAR, load_CIFAR
+from datasets.tiny import TinyImageNet, load_tiny
+from datasets.svhn import SVHN, load_SVHN, Selcted_DATA
 from datasets.transforms import SemiAugment, TestAugment
 
 from models import WRN, densenet121, vgg16_bn, inceptionv4
@@ -97,10 +97,8 @@ def main_worker(local_rank: int, config: object):
 
         datasets, _ = load_CIFAR(root=config.root,data_name=config.data,n_valid_per_class=config.n_valid_per_class,seed=config.seed, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio, logger=logger)
 
-        labeled_set = CIFAR_TWO_AUG(data_name=config.data, dataset=datasets['l_train'], transform=train_trans, name='train_lb')
-
-        unlabeled_set = CIFAR_TWO_AUG(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        unlabeled_selected_set = CIFAR_TWO_AUG(data_name=config.data, dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+        labeled_set = Selcted_DATA(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
+        unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
 
         eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -110,10 +108,8 @@ def main_worker(local_rank: int, config: object):
         
         datasets, _ = load_tiny(root=config.root, n_label_per_class=config.n_label_per_class,n_valid_per_class=config.n_valid_per_class,mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
 
-        labeled_set = TINY_TWO_AUG(data_name=config.data, dataset=datasets['l_train'], transform=train_trans, name='train_lb')
-
-        unlabeled_set = TINY_TWO_AUG(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        unlabeled_selected_set = TINY_TWO_AUG(data_name=config.data, dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+        labeled_set = Selcted_DATA(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
+        unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
 
         eval_set = TinyImageNet(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = TinyImageNet(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -123,10 +119,8 @@ def main_worker(local_rank: int, config: object):
         
         datasets, _ = load_SVHN(root=config.root, data_name=config.data, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
 
-        labeled_set = SVHN_TWO_AUG(data_name=config.data, dataset=datasets['l_train'], name='train_lb',transform=train_trans)
-
-        unlabeled_set = SVHN_TWO_AUG(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        unlabeled_selected_set = SVHN_TWO_AUG(data_name=config.data, dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+        labeled_set = Selcted_DATA(data_name=config.data, dataset=datasets['l_train'], name='train_lb',transform=train_trans)
+        unlabeled_set = Selcted_DATA(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
 
         eval_set = SVHN(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -161,7 +155,7 @@ def main_worker(local_rank: int, config: object):
     # Train & evaluate
     start = time.time()
     model.run(
-        train_set=[labeled_set,unlabeled_set,unlabeled_selected_set],
+        train_set=[labeled_set,unlabeled_set],
         eval_set=eval_set,
         test_set=test_set,
         open_test_set=open_test_set,
@@ -171,6 +165,7 @@ def main_worker(local_rank: int, config: object):
         start_fix=config.start_fix,
         lambda_em=config.lambda_em,
         lambda_socr=config.lambda_socr,
+        train_trans=train_trans,
         enable_plot=config.enable_plot,
         logger=logger
     )

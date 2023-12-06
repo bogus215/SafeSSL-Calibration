@@ -206,51 +206,6 @@ class TinyImageNet_STRONG(Dataset):
     def __len__(self):
         return len(self.targets)
     
-class TINY_TWO_AUG(Dataset):
-    def __init__(self,
-                 data_name: str,
-                 dataset: dict,
-                 name: str,
-                 transform: object = None,
-                 **kwargs):
-
-        self.data_name = data_name
-        self.data = deepcopy(dataset['images'])
-        self.targets = deepcopy(dataset['labels'])
-        self.transform = transform
-        self.name = name
-        self.set_index()
-
-    def set_index(self, indices=None):
-        if indices is not None:
-            self.data_index = self.data[indices.cpu()]
-            self.targets_index = list(np.array(self.targets)[indices.cpu()])
-        else:
-            self.data_index = self.data
-            self.targets_index = self.targets
-
-    def __sample__(self, idx):
-
-        target = self.targets_index[idx]
-        img = self.data_index[idx]
-
-        return img, target
-    
-    def __getitem__(self, idx):
-        img, target = self.__sample__(idx)
-        if self.transform is not None:
-            weak_img = self.transform(img)
-
-        if self.name == 'train_lb':
-            return {'idx_lb': idx, 'x_lb': weak_img, 'x_lb_w_0': weak_img, 'x_lb_w_1': self.transform(img),'y_lb': target}
-        elif self.name == 'train_ulb':
-            return {'idx_ulb': idx, 'x_ulb_w_0': weak_img, 'x_ulb_w_1': self.transform(img), 'y_ulb': target}
-        elif self.name == 'train_ulb_selected':
-            return {'x_ulb_w': weak_img, 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
-
-    def __len__(self):
-        return len(self.data_index)
-    
 if __name__ == '__main__':
 
     datasets, _ = load_tiny(root='/mnthdd/Dropbox/D/personal_study/SafeSSL+Calibration/datasets',

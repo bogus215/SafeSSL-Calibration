@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
+from datasets.svhn import Selcted_DATA
 
 from tasks.classification import Classification as Task
 from utils import RandomSampler, TopKAccuracy
@@ -30,6 +31,7 @@ class Classification(Task):
             start_fix,
             lambda_em,
             lambda_socr,
+            train_trans,
             **kwargs):  # pylint: disable=unused-argument
 
         num_workers = self.num_workers
@@ -61,14 +63,10 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_loader=unlabel_loader,selected_unlabeled_dataset=train_set[2],start_fix=start_fix,current_epoch=epoch)
+            selcted_u_data = self.exclude_dataset(unlabeled_loader=unlabel_loader,start_fix=start_fix,current_epoch=epoch,transform=train_trans)
             
             # Train & evaluate
-            ## selected unlabeled
-            sampler = RandomSampler(len(train_set[2]), len(unlabel_loader) * self.batch_size // 2)
-            selected_u_loader = DataLoader(train_set[2],batch_size=self.batch_size//2, sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
-            
-            assert len(l_loader)==len(unlabel_loader)==len(selected_u_loader), "Loader problems ... "
+            selected_u_loader = DataLoader(selcted_u_data,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=True,shuffle=True)
             train_history, cls_wise_results = self.train(l_loader, unlabel_loader, selected_u_loader, current_epoch=epoch,start_fix=start_fix, p_cutoff=p_cutoff, n_bins=n_bins, lambda_em=lambda_em,lambda_socr=lambda_socr)
             eval_history = self.evaluate(eval_loader, n_bins)
             if enable_plot:
@@ -121,7 +119,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def exclude_dataset(self, unlabeled_loader, selected_unlabeled_dataset,start_fix,current_epoch):
+    def exclude_dataset(self,unlabeled_loader,start_fix,current_epoch,transform):
 
         self._set_learning_phase(train=False)
         
@@ -171,7 +169,11 @@ class Classification(Task):
         self._set_learning_phase(train=True)
         if current_epoch >= start_fix:
             if len(selected_idx) > 0:
-                selected_unlabeled_dataset.set_index(selected_idx)
+                return Selcted_DATA(dataset={"images":unlabeled_loader.dataset.data[selected_idx.cpu()],"labels":list(np.array(unlabeled_loader.dataset.targets)[selected_idx.cpu()])},name='train_ulb_selected', transform=transform)
+            else:
+                return Selcted_DATA(dataset={"images":unlabeled_loader.dataset.data,"labels":unlabeled_loader.dataset.targets},name='train_ulb_selected', transform=transform)
+        else:
+            return Selcted_DATA(dataset={"images":unlabeled_loader.dataset.data,"labels":unlabeled_loader.dataset.targets},name='train_ulb_selected', transform=transform)
 
     def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, p_cutoff, n_bins, lambda_em,lambda_socr):
         """Training defined for a single epoch."""
@@ -209,8 +211,12 @@ class Classification(Task):
 
                     data_lb = next(label_iterator)
                     data_ulb = next(unlabel_iterator)
-                    data_ulb_selected = next(selected_unlabel_iterator)
-                    
+                    try:
+                        data_ulb_selected = next(selected_unlabel_iterator)
+                    except:
+                        selected_unlabel_iterator = iter(selected_unlabel_loader)
+                        data_ulb_selected = next(selected_unlabel_iterator)
+
                     x_lb_w_0 = data_lb["x_lb_w_0"].to(self.local_rank)
                     x_lb_w_1 = data_lb["x_lb_w_1"].to(self.local_rank)
                     y_lb = data_lb["y_lb"].to(self.local_rank) 
