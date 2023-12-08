@@ -15,7 +15,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --warm-up 1 --normalize
+                                    --weight-decay 0 --warm-up 1 --normalize --pi 0.01
 
         echo PROPOSED+CIFAR100, ${CIFAR100_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
@@ -25,7 +25,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --warm-up 1 --normalize
+                                    --weight-decay 0 --warm-up 1 --normalize --pi 0.05
 
         echo PROPOSED+TINY, ${TINY_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
@@ -35,7 +35,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --warm-up 1 --normalize
+                                    --weight-decay 0 --warm-up 1 --normalize --pi 0.1
 
         echo PROPOSED+SVHN, ${SVHN_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
@@ -44,6 +44,6 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --warm-up 1 --normalize
+                                    --weight-decay 0 --warm-up 1 --normalize --pi 0.005
     done
 done
