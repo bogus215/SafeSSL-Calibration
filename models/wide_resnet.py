@@ -130,15 +130,14 @@ class WRN(nn.Module):
         # Expand temperature to match the size of logits
         temperature = self.temperature.unsqueeze(1).expand(logits.size(0), logits.size(1))
         
-        return logits / (torch.abs(temperature)+1e-5)
+        return torch.nn.functional.normalize(logits) / (torch.abs(temperature)+1e-5)
 
     
 class Deep_Classifier(nn.Module):
     def __init__(self, in_node, out_node):
         super().__init__()
         
-        self.linear1 = nn.Linear(in_node,in_node)
-        self.linear2 = nn.Linear(in_node,out_node, bias=False)
+        self.linear = nn.Linear(in_node,out_node, bias=False)
         self.reversal = GradientReversalLayer()
         
         self.in_features = in_node
@@ -146,14 +145,14 @@ class Deep_Classifier(nn.Module):
         
     def forward(self,feature,reverse=False, return_feature=False):
         
-        feature = self.linear1(feature)
+        feature = nn.functional.normalize(feature)
         
         if reverse:
             feature = self.reversal(feature)
         
-        feature = nn.functional.normalize(feature)
+        logits = self.linear(feature)
         
         if return_feature:
-            return self.linear2(feature), feature
+            return logits, feature
         else:
-            return self.linear2(feature)
+            return logits
