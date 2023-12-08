@@ -299,7 +299,7 @@ class Classification(Task):
 
     def get_feature(self, x: torch.FloatTensor):
         """Make a prediction provided a batch of samples."""
-        return self.backbone(x, True)
+        return self.backbone(x, return_feature=True)
 
     def _set_learning_phase(self, train=False):
         if train:

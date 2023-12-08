@@ -183,7 +183,7 @@ class Classification(Task):
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     
-                    l_ul_cls_losses = -(self.backbone.mlp(full_features.squeeze()).log_softmax(1)*nn.functional.one_hot(torch.cat([torch.zeros_like(label_y.long()),
+                    l_ul_cls_losses = -(self.backbone.mlp(full_features).log_softmax(1)*nn.functional.one_hot(torch.cat([torch.zeros_like(label_y.long()),
                                                                                                                                    torch.ones_like(label_y.long()),
                                                                                                                                    torch.ones_like(label_y.long())]),2)).sum(1)
                     l_ul_cls_loss = l_ul_cls_losses.mean()
@@ -250,8 +250,7 @@ class Classification(Task):
 
                 if used_unlabeled_index.sum().item() != 0:
                     with torch.cuda.amp.autocast(self.mixed_precision):
-                        reverse_unlabel_features = self.backbone.get_only_feature(unlabel_weak_x[used_unlabeled_index])
-                        reverse_logits = self.backbone.output(self.backbone.reverse(reverse_unlabel_features.view(used_unlabeled_index.sum().item(),-1)))
+                        reverse_logits = self.backbone(unlabel_weak_x[used_unlabeled_index],reverse=True)
                         entropy_loss = (reverse_logits.softmax(1)*reverse_logits.log_softmax(1)).sum(1).mean()*entropy_coef
 
                     if self.scaler is not None:

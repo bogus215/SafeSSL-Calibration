@@ -84,8 +84,6 @@ def main_worker(local_rank: int, config: object):
     
     # Sub-Network Plus
     import torch.nn as nn
-    from torch.autograd import Function
-
     class LULClassifier(nn.Module):
         def __init__(self, feature) -> None:
             super().__init__()
@@ -100,24 +98,8 @@ def main_worker(local_rank: int, config: object):
             x_ = x.detach()
             return self.mlp(x_)
 
-    class GradientReversalFunction(Function):
-        def forward(self, x):
-            return x.view_as(x)
-
-        def backward(self, grad_output):
-            output = grad_output.neg()
-            return output
-
-    class GradientReversalLayer(nn.Module):
-        def __init__(self):
-            super(GradientReversalLayer, self).__init__()
-
-        def forward(self, x):
-            return GradientReversalFunction.apply(x)
-
     setattr(model,'mlp', LULClassifier(model.output.in_features))
     setattr(model,'temperature', nn.Parameter(torch.ones(1) * 1.5))
-    setattr(model,'reverse', GradientReversalLayer())
 
     initialize_weights(model)
     

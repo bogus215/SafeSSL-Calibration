@@ -1,6 +1,23 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
 
+from torch.autograd import Function
+
+class GradientReversalFunction(Function):
+    def forward(self, x):
+        return x.view_as(x)
+
+    def backward(self, grad_output):
+        output = grad_output.neg()
+        return output
+
+class GradientReversalLayer(nn.Module):
+    def __init__(self):
+        super(GradientReversalLayer, self).__init__()
+
+    def forward(self, x):
+        return GradientReversalFunction.apply(x)
+        
 def conv3x3(i_c, o_c, stride=1):
     return nn.Conv2d(i_c, o_c, 3, stride, 1, bias=False)
 
@@ -76,9 +93,9 @@ class WRN(nn.Module):
         self.normalize = kwargs.get('normalize',False)
 
         if self.normalize:
-            self.output = nn.Linear(filters[3], num_classes, bias=False)
+            self.output = Deep_Classifier(filters[3], num_classes)
         else:
-            self.output = nn.Linear(filters[3], num_classes)
+            raise NotImplementedError
 
         self.class_num = num_classes
 
@@ -93,18 +110,15 @@ class WRN(nn.Module):
                 if not self.normalize:
                     nn.init.constant_(m.bias, 0)
 
-    def forward(self, x, return_feature=False):
+    def forward(self, x, return_feature=False, reverse=False):
 
         x = self.init_conv(x)
         x = self.unit1(x)
         x = self.unit2(x)
         x = self.unit3(x)
-        f = nn.functional.normalize(self.unit4(x)) if self.normalize else self.unit4(x)
-        c = self.output(f.squeeze())
-        if return_feature:
-            return [c, f]
-        else:
-            return c
+        x = self.unit4(x)
+
+        return self.output(x.squeeze(-1).squeeze(-1), return_feature=return_feature, reverse=reverse)
 
     def update_batch_stats(self, flag):
         for m in self.modules():
@@ -115,17 +129,31 @@ class WRN(nn.Module):
 
         # Expand temperature to match the size of logits
         temperature = self.temperature.unsqueeze(1).expand(logits.size(0), logits.size(1))
-        if self.normalize:
-            logits = torch.nn.functional.normalize(logits)
         
         return logits / (torch.abs(temperature)+1e-5)
-    
-    def get_only_feature(self, x):
 
-        x = self.init_conv(x)
-        x = self.unit1(x)
-        x = self.unit2(x)
-        x = self.unit3(x)
-        f = nn.functional.normalize(self.unit4(x)) if self.normalize else self.unit4(x)
+    
+class Deep_Classifier(nn.Module):
+    def __init__(self, in_node, out_node):
+        super().__init__()
         
-        return f
+        self.linear1 = nn.Linear(in_node,in_node)
+        self.linear2 = nn.Linear(in_node,out_node, bias=False)
+        self.reversal = GradientReversalLayer()
+        
+        self.in_features = in_node
+        self.out_features = out_node
+        
+    def forward(self,feature,reverse=False, return_feature=False):
+        
+        feature = self.linear1(feature)
+        
+        if reverse:
+            feature = self.reversal(feature)
+        
+        feature = nn.functional.normalize(feature)
+        
+        if return_feature:
+            return self.linear2(feature), feature
+        else:
+            return self.linear2(feature)
