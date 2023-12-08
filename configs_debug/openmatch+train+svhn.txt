@@ -1,11 +1,13 @@
---gpus=3
+--gpus=1
 --seed=1
 --data=svhn
 --server=workstation1
 --n-label-per-class=50
---enable-wandb
 --mismatch-ratio=0.30
 --mixed-precision
 --save-every=5000
---n-bins=15
---start-fix=10
+--learning-rate=3e-3
+--backbone-type=wide28_2
+--optimizer=adam
+--weight-decay=0
+--warm-up=1
