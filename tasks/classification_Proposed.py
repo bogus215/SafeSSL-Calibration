@@ -29,9 +29,7 @@ class Classification(Task):
             save_every,
             tau,
             pi,
-            consis_coef,
             cali_coef,
-            entropy_coef,
             warm_up_end,
             n_bins: int = 15,
             train_n_bins: int = 30,
@@ -72,11 +70,14 @@ class Classification(Task):
         epochs = self.iterations // save_every
         self.warm_up_end = warm_up_end
         self.trained_iteration = 0
-
+        
+        self.pi_iteration = 0
+        self.n_numbers = 0
+        
         for epoch in range(1, epochs + 1):
 
             # Train & evaluate
-            train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, pi=pi, consis_coef=consis_coef, cali_coef=cali_coef, entropy_coef=entropy_coef, smoothing_proposed=None if epoch==1 else ece_results, n_bins=n_bins)
+            train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, pi=pi, cali_coef=cali_coef, smoothing_proposed=None if epoch==1 else ece_results, n_bins=n_bins)
             eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
             try:
                 if self.ckpt_dir.split("/")[2] in ['cifar10','svhn'] and enable_plot:
@@ -132,7 +133,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_iterator, unlabel_iterator, iteration, tau, pi, consis_coef, cali_coef, entropy_coef, smoothing_proposed, n_bins):
+    def train(self, label_iterator, unlabel_iterator, iteration, tau, pi, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         self._set_learning_phase(train=True)
@@ -144,10 +145,9 @@ class Classification(Task):
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'warm_up_coef': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
-            "Temperature": torch.zeros(iteration, device=self.local_rank),
+            "cali_temp": torch.zeros(iteration, device=self.local_rank),
             'cali_loss': torch.zeros(iteration, device=self.local_rank),
-            'l_ul_cls_loss' : torch.zeros(iteration, device=self.local_rank),
-            'entropy_loss' : torch.zeros(iteration, device=self.local_rank)
+            'l_ul_cls_loss' : torch.zeros(iteration, device=self.local_rank)
         }
         
         if self.backbone.class_num==6:
@@ -164,7 +164,7 @@ class Classification(Task):
 
             for i in range(iteration):
                 with torch.cuda.amp.autocast(self.mixed_precision):
-                    warm_up_coef = math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
+                    warm_up_coef = math.exp(-5 * (1 - min(self.pi_iteration/self.warm_up_end, 1))**2)
 
                     l_batch = next(label_iterator)
                     u_batch = next(unlabel_iterator)
@@ -248,23 +248,11 @@ class Classification(Task):
 
                 self.optimizer.zero_grad()
                 self.trained_iteration+=1
+                
+                if used_unlabeled_index.sum().item() > self.n_numbers:
+                    self.pi_iteration += 1
 
-                if used_unlabeled_index.sum().item() != 0:
-                    with torch.cuda.amp.autocast(self.mixed_precision):
-                        self.backbone.update_batch_stats(False)
-                        reverse_logits = self.backbone.scaling_logits(self.backbone(unlabel_weak_x[used_unlabeled_index],reverse=True), name="entrop_scaler")
-                        entropy_loss = (reverse_logits.softmax(1)*reverse_logits.log_softmax(1)).sum(1).mean()*entropy_coef
-                        self.backbone.update_batch_stats(True)
-
-                    if self.scaler is not None:
-                        self.scaler.scale(entropy_loss).backward()
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
-                    else:
-                        entropy_loss.backward()
-                        self.optimizer.step()
-
-                    self.optimizer.zero_grad()
+                self.n_numbers = used_unlabeled_index.sum().item()
 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
@@ -275,12 +263,11 @@ class Classification(Task):
                     result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
                     result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_scaled_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
                                                               targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
-                    result['entropy_loss'][i] = entropy_loss.detach()
                 result['warm_up_coef'][i] = warm_up_coef
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
-                result["Temperature"][i] = self.backbone.temperature.item()
+                result["cali_temp"][i] = self.backbone.cali_scaler.item()
                 result['l_ul_cls_loss'][i] = l_ul_cls_loss.detach()
-
+                
                 unique, counts = np.unique(unlabel_y[used_unlabeled_index].cpu().numpy(), return_counts = True)
                 uniq_cnt_dict = dict(zip(unique, counts))
                 

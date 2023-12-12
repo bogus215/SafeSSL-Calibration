@@ -100,7 +100,6 @@ def main_worker(local_rank: int, config: object):
 
     setattr(model,'mlp', LULClassifier(model.output.in_features))
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
-    setattr(model,'entrop_scaler', nn.Parameter(torch.ones(1) * 1.5))
 
     initialize_weights(model)
     
@@ -175,9 +174,7 @@ def main_worker(local_rank: int, config: object):
         save_every=config.save_every,
         tau=config.tau,
         pi=config.pi,
-        consis_coef=config.consis_coef,
         cali_coef=config.cali_coef,
-        entropy_coef=config.entropy_coef,
         warm_up_end=config.warm_up,
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
