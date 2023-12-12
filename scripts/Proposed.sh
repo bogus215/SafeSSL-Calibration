@@ -7,6 +7,15 @@ for seed in 0
 do
     for ratio in 0.3 0.6
     do
+        echo PROPOSED+SVHN, ${SVHN_SEEDS[$seed]}, $ratio
+        python ./main/run_PROPOSED.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
+                                    --data svhn --server main --enable-wandb \
+                                    --n-label-per-class 50 \
+                                    --mismatch-ratio $ratio --mixed-precision \
+                                    --save-every 5000 --learning-rate 3e-3 \
+                                    --backbone-type wide28_2 --optimizer adam \
+                                    --weight-decay 0 --normalize --pi 0.005 --entropy-coef 0.005
+
         echo PROPOSED+CIFAR10, ${CIFAR10_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
                                     --data cifar10 --server main --enable-wandb \
@@ -35,15 +44,6 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --pi 0.1 --entropy-coef 0.01
-
-        echo PROPOSED+SVHN, ${SVHN_SEEDS[$seed]}, $ratio
-        python ./main/run_PROPOSED.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
-                                    --data svhn --server main --enable-wandb \
-                                    --n-label-per-class 50 \
-                                    --mismatch-ratio $ratio --mixed-precision \
-                                    --save-every 5000 --learning-rate 3e-3 \
-                                    --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --pi 0.005 --entropy-coef 0.01
+                                    --weight-decay 0 --normalize --pi 0.1 --entropy-coef 0.005
     done
 done
