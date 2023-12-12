@@ -164,6 +164,8 @@ class Classification(Task):
 
             for i in range(iteration):
                 with torch.cuda.amp.autocast(self.mixed_precision):
+                    warm_up_coef = math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
+
                     l_batch = next(label_iterator)
                     u_batch = next(unlabel_iterator)
 
@@ -187,7 +189,7 @@ class Classification(Task):
                                                                                                                                    torch.ones_like(label_y.long()),
                                                                                                                                    torch.ones_like(label_y.long())]),2)).sum(1)
                     l_ul_cls_loss = l_ul_cls_losses.mean()
-                    used_unlabeled_index = (unlabel_confidence>tau) & (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>pi)
+                    used_unlabeled_index = (unlabel_confidence>tau) & (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef))
                     
                     if smoothing_proposed is not None:
 
@@ -234,8 +236,7 @@ class Classification(Task):
                     else:
                         unlabel_loss = torch.zeros(1).to(self.local_rank)
                 
-                    warm_up_coef = consis_coef*math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
-                    loss = label_loss + warm_up_coef*unlabel_loss + l_ul_cls_loss
+                    loss = label_loss + unlabel_loss + l_ul_cls_loss
 
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward(retain_graph=True) if used_unlabeled_index.sum().item() != 0 else self.scaler.scale(loss).backward()
@@ -250,8 +251,10 @@ class Classification(Task):
 
                 if used_unlabeled_index.sum().item() != 0:
                     with torch.cuda.amp.autocast(self.mixed_precision):
-                        reverse_logits = self.backbone(unlabel_weak_x[used_unlabeled_index],reverse=True)
+                        self.backbone.update_batch_stats(False)
+                        reverse_logits = self.backbone.scaling_logits(self.backbone(unlabel_weak_x[used_unlabeled_index],reverse=True))
                         entropy_loss = (reverse_logits.softmax(1)*reverse_logits.log_softmax(1)).sum(1).mean()*entropy_coef
+                        self.backbone.update_batch_stats(True)
 
                     if self.scaler is not None:
                         self.scaler.scale(entropy_loss).backward()
