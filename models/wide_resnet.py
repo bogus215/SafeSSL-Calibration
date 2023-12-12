@@ -126,10 +126,10 @@ class WRN(nn.Module):
             if isinstance(m, nn.BatchNorm2d):
                 m.update_batch_stats = flag
 
-    def scaling_logits(self, logits):
+    def scaling_logits(self, logits, name='cali_scaler'):
 
         # Expand temperature to match the size of logits
-        temperature = self.temperature.unsqueeze(1).expand(logits.size(0), logits.size(1))
+        temperature = getattr(self,name).unsqueeze(1).expand(logits.size(0), logits.size(1))
         
         return logits / (torch.abs(temperature)+1e-5)
 

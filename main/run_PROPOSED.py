@@ -99,7 +99,8 @@ def main_worker(local_rank: int, config: object):
             return self.mlp(x_)
 
     setattr(model,'mlp', LULClassifier(model.output.in_features))
-    setattr(model,'temperature', nn.Parameter(torch.ones(1) * 1.5))
+    setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+    setattr(model,'entrop_scaler', nn.Parameter(torch.ones(1) * 1.5))
 
     initialize_weights(model)
     

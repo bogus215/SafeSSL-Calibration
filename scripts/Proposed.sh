@@ -14,7 +14,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --pi 0.005 --entropy-coef 0.005
+                                    --weight-decay 0 --normalize --pi 0.0005 --entropy-coef 0.0005
 
         echo PROPOSED+CIFAR10, ${CIFAR10_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
@@ -24,7 +24,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --pi 0.01 --entropy-coef 0.005
+                                    --weight-decay 0 --normalize --pi 0.01 --entropy-coef 0.0005
 
         echo PROPOSED+CIFAR100, ${CIFAR100_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
