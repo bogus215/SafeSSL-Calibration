@@ -239,11 +239,11 @@ class Classification(Task):
                     loss = label_loss + unlabel_loss + l_ul_cls_loss
 
                 if self.scaler is not None:
-                    self.scaler.scale(loss).backward(retain_graph=True) if used_unlabeled_index.sum().item() != 0 else self.scaler.scale(loss).backward()
+                    self.scaler.scale(loss).backward()
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
-                    loss.backward(retain_graph=True) if used_unlabeled_index.sum().item() != 0 else loss.backward()
+                    loss.backward()
                     self.optimizer.step()
 
                 self.optimizer.zero_grad()
