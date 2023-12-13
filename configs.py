@@ -236,6 +236,63 @@ class ProposedConfig(ConfigBase):
     def task(self) -> str:
         return "Proposed"
 
+class Ablation1Config(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(Ablation1Config, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--tau', type=float, default=0.95)
+        parser.add_argument('--cali-coef', type=float, default=1)
+        parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
+        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "Ablation1"
+    
+class Ablation2Config(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(Ablation2Config, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--tau', type=float, default=0.95)
+        parser.add_argument('--pi', type=float, default=0.05)
+        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "Ablation2"
+
+class Ablation3Config(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(Ablation3Config, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--tau', type=float, default=0.95)
+        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "Ablation3"
+    
 class IOMATCHConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
         super(IOMATCHConfig, self).__init__(args, **kwargs)
