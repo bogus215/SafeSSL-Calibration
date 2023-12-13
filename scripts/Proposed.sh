@@ -14,7 +14,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --pi 0.0005 
+                                    --weight-decay 0 --normalize --pi 1e-4
 
         echo PROPOSED+CIFAR10, ${CIFAR10_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
@@ -24,7 +24,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --pi 0.01 
+                                    --weight-decay 0 --normalize --pi 1e-2
 
         echo PROPOSED+CIFAR100, ${CIFAR100_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
@@ -34,7 +34,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --pi 0.05
+                                    --weight-decay 0 --normalize --pi 5e-2
 
         echo PROPOSED+TINY, ${TINY_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
@@ -44,6 +44,6 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --pi 0.1
+                                    --weight-decay 0 --normalize --pi 1e-1
     done
 done
