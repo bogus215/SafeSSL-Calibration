@@ -93,10 +93,7 @@ class WRN(nn.Module):
 
         self.normalize = kwargs.get('normalize',False)
 
-        if self.normalize:
-            self.output = Deep_Classifier(filters[3], num_classes)
-        else:
-            raise NotImplementedError
+        self.output = Deep_Classifier(filters[3], num_classes, normalize=self.normalize)
 
         self.class_num = num_classes
 
@@ -135,18 +132,25 @@ class WRN(nn.Module):
 
     
 class Deep_Classifier(nn.Module):
-    def __init__(self, in_node, out_node):
+    def __init__(self, in_node, out_node, normalize):
         super().__init__()
         
-        self.linear = nn.Linear(in_node,out_node, bias=False)
+        if normalize:
+            self.linear = nn.Linear(in_node,out_node, bias=False)
+        else:
+            self.linear = nn.Linear(in_node,out_node)
+            
         self.reversal = GradientReversalLayer()
         
         self.in_features = in_node
         self.out_features = out_node
         
+        self.normalize = normalize
+        
     def forward(self,feature,reverse=False, return_feature=False):
         
-        feature = nn.functional.normalize(feature)
+        if self.normalize:
+            feature = nn.functional.normalize(feature)
         
         if reverse:
             feature = self.reversal(feature)
