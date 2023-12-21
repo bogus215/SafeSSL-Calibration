@@ -185,9 +185,15 @@ class Classification(Task):
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     
-                    l_ul_cls_losses = -(self.backbone.mlp(full_features).log_softmax(1)*nn.functional.one_hot(torch.cat([torch.zeros_like(label_y.long()),
-                                                                                                                                   torch.ones_like(label_y.long()),
-                                                                                                                                   torch.ones_like(label_y.long())]),2)).sum(1)
+                    l_ul_cls_logits = self.backbone.mlp(full_features).view(full_features.size(0),-1,2)
+                    gather_label = torch.cat([label_y, unlabel_pseudo_y, unlabel_pseudo_y])
+                    gather_label = gather_label.view(-1,1,1).expand(-1,-1,2)
+                    l_ul_cls_logits = torch.gather(l_ul_cls_logits,1,gather_label).squeeze(1)
+                    
+                    l_ul_cls_losses = -(l_ul_cls_logits.log_softmax(1)*nn.functional.one_hot(torch.cat([torch.zeros_like(label_y.long()),
+                                                                                                        torch.ones_like(label_y.long()),
+                                                                                                        torch.ones_like(label_y.long())]),2)).sum(1)
+                    
                     l_ul_cls_loss = l_ul_cls_losses.mean()
                     used_unlabeled_index = (unlabel_confidence>tau) & (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef))
                     

@@ -85,7 +85,7 @@ def main_worker(local_rank: int, config: object):
     # Sub-Network Plus
     import torch.nn as nn
     class LULClassifier(nn.Module):
-        def __init__(self, feature) -> None:
+        def __init__(self, feature, class_num) -> None:
             super().__init__()
             self.mlp = nn.Sequential(nn.Linear(feature,feature),
                                      nn.LayerNorm(feature),
@@ -93,16 +93,16 @@ def main_worker(local_rank: int, config: object):
                                      nn.Linear(feature,feature),
                                      nn.LayerNorm(feature),
                                      nn.LeakyReLU(0.1),
-                                     nn.Linear(feature,2,bias=False))
+                                     nn.Linear(feature,2*class_num,bias=False))
         def forward(self,x):
             x_ = x.detach()
             return self.mlp(x_)
 
-    setattr(model,'mlp', LULClassifier(model.output.in_features))
+    setattr(model,'mlp', LULClassifier(model.output.in_features, model.class_num))
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
 
     initialize_weights(model)
-    
+
     # Data (transforms & datasets)
     trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
     train_trans = AUGMENTS[config.train_augment](**trans_kwargs)
