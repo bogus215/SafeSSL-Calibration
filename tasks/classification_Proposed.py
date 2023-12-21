@@ -249,10 +249,10 @@ class Classification(Task):
                 self.optimizer.zero_grad()
                 self.trained_iteration+=1
                 
-                if used_unlabeled_index.sum().item() > self.n_numbers:
+                if (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef)).sum().item() > self.n_numbers:
                     self.pi_iteration += 1
 
-                self.n_numbers = used_unlabeled_index.sum().item()
+                self.n_numbers = (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef)).sum().item()
 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()

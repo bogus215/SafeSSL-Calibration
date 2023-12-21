@@ -76,7 +76,7 @@ def main_worker(local_rank: int, config: object):
         if config.enable_wandb:
             configure_wandb(
                 name=f'{config.task} : {config.hash}',
-                project=f'SafeSSL-Calibration-{config.data}-{config.task}',
+                project=f'SafeSSL-Calibration-{config.data}-{config.task}{config.wandb_proj_v}',
                 config=config
             )
     else:
