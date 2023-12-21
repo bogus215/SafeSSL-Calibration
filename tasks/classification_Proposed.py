@@ -145,6 +145,7 @@ class Classification(Task):
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'warm_up_coef': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
+            "or_N_used_unlabeled": torch.zeros(iteration, device=self.local_rank),
             "cali_temp": torch.zeros(iteration, device=self.local_rank),
             'cali_loss': torch.zeros(iteration, device=self.local_rank),
             'l_ul_cls_loss' : torch.zeros(iteration, device=self.local_rank)
@@ -196,6 +197,7 @@ class Classification(Task):
                     
                     l_ul_cls_loss = l_ul_cls_losses.mean()
                     used_unlabeled_index = (unlabel_confidence>tau) & (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef))
+                    or_used_unlabeled_index = (unlabel_confidence>tau) | (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef))
                     
                     if smoothing_proposed is not None:
 
@@ -271,6 +273,7 @@ class Classification(Task):
                                                               targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                 result['warm_up_coef'][i] = warm_up_coef
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
+                result["or_N_used_unlabeled"][i] = or_used_unlabeled_index.sum().item()
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
                 result['l_ul_cls_loss'][i] = l_ul_cls_loss.detach()
                 
