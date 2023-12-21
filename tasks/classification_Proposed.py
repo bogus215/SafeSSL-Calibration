@@ -143,6 +143,8 @@ class Classification(Task):
             'ece': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
+            'or_unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
+            'or_unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'warm_up_coef': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
             "or_N_used_unlabeled": torch.zeros(iteration, device=self.local_rank),
@@ -274,6 +276,12 @@ class Classification(Task):
                 result['warm_up_coef'][i] = warm_up_coef
                 result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
                 result["or_N_used_unlabeled"][i] = or_used_unlabeled_index.sum().item()
+
+                if or_used_unlabeled_index.sum().item() != 0:
+                    result['or_unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[or_used_unlabeled_index], unlabel_y[or_used_unlabeled_index]).detach()
+                    result['or_unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_scaled_logit[or_used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
+                                                              targets=unlabel_y[or_used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
+
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
                 result['l_ul_cls_loss'][i] = l_ul_cls_loss.detach()
                 
