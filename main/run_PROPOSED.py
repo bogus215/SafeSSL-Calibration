@@ -8,9 +8,9 @@ import torch
 
 sys.path.append("./")
 from configs import ProposedConfig
-from datasets.cifar import CIFAR, load_CIFAR, CIFAR_STRONG
-from datasets.tiny import TinyImageNet ,load_tiny, TinyImageNet_STRONG
-from datasets.svhn import SVHN, load_SVHN, SVHN_STRONG
+from datasets.cifar import CIFAR, load_CIFAR
+from datasets.tiny import TinyImageNet ,load_tiny
+from datasets.svhn import SVHN, load_SVHN, Selcted_DATA_Proposed
 from datasets.transforms import SemiAugment, TestAugment
 
 from models import WRN, densenet121, vgg16_bn, inceptionv4
@@ -85,24 +85,29 @@ def main_worker(local_rank: int, config: object):
     # Sub-Network Plus
     import torch.nn as nn
     class LULClassifier(nn.Module):
-        def __init__(self, feature, class_num) -> None:
+        def __init__(self, feature, size) -> None:
             super().__init__()
-            self.mlp = nn.Sequential(nn.Linear(feature,feature),
-                                     nn.LayerNorm(feature),
-                                     nn.LeakyReLU(0.1),
-                                     nn.Linear(feature,feature),
-                                     nn.LayerNorm(feature),
-                                     nn.LeakyReLU(0.1),
-                                     nn.Linear(feature,2*class_num,bias=False))
+            
+            assert size>=2
+            
+            modules = []
+            for _ in range(size-1):
+                modules.append(nn.Linear(feature,feature))
+                modules.append(nn.LayerNorm(feature))
+                modules.append(nn.LeakyReLU(0.1))
+            modules.append(nn.Linear(feature,2,bias=False))
+            
+            self.mlp = nn.Sequential(*modules)
+            
         def forward(self,x):
             x_ = x.detach()
             return self.mlp(x_)
 
-    setattr(model,'mlp', LULClassifier(model.output.in_features, model.class_num))
+    setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size))
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
 
     initialize_weights(model)
-
+    
     # Data (transforms & datasets)
     trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
     train_trans = AUGMENTS[config.train_augment](**trans_kwargs)
@@ -112,8 +117,10 @@ def main_worker(local_rank: int, config: object):
 
         datasets, _ = load_CIFAR(root=config.root,data_name=config.data,n_valid_per_class=config.n_valid_per_class,seed=config.seed, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio, logger=logger)
 
-        labeled_set = CIFAR(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
-        unlabeled_set = CIFAR_STRONG(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
+        labeled_set = Selcted_DATA_Proposed(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
+        unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
+        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+
         eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
         open_test_set = CIFAR(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
@@ -122,8 +129,10 @@ def main_worker(local_rank: int, config: object):
         
         datasets, _ = load_tiny(root=config.root, n_label_per_class=config.n_label_per_class,n_valid_per_class=config.n_valid_per_class,mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
 
-        labeled_set = TinyImageNet(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
-        unlabeled_set = TinyImageNet_STRONG(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
+        labeled_set = Selcted_DATA_Proposed(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
+        unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
+        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+
         eval_set = TinyImageNet(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = TinyImageNet(data_name=config.data, dataset=datasets['test'], transform=test_trans)
         open_test_set = TinyImageNet(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
@@ -132,8 +141,10 @@ def main_worker(local_rank: int, config: object):
         
         datasets, _ = load_SVHN(root=config.root, data_name=config.data, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
 
-        labeled_set = SVHN(data_name=config.data, dataset=datasets['l_train'], transform=train_trans)
-        unlabeled_set = SVHN_STRONG(data_name=config.data, dataset=datasets['u_train'], transform=train_trans)
+        labeled_set = Selcted_DATA_Proposed(data_name=config.data, dataset=datasets['l_train'], name='train_lb',transform=train_trans)
+        unlabeled_set = Selcted_DATA_Proposed(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
+        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+
         eval_set = SVHN(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
         open_test_set = SVHN(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
@@ -167,7 +178,7 @@ def main_worker(local_rank: int, config: object):
     # Train & evaluate
     start = time.time()
     model.run(
-        train_set=[labeled_set,unlabeled_set],
+        train_set=[labeled_set,unlabeled_set,selcted_unlabeled_set],
         eval_set=eval_set,
         test_set=test_set,
         open_test_set=open_test_set,
@@ -176,6 +187,7 @@ def main_worker(local_rank: int, config: object):
         pi=config.pi,
         cali_coef=config.cali_coef,
         warm_up_end=config.warm_up,
+        start_fix=config.start_fix,
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,

@@ -222,3 +222,54 @@ class Selcted_DATA(Dataset):
             return {'x_ulb_w': weak_img, 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
         else:
             raise ValueError
+        
+class Selcted_DATA_Proposed(Dataset):
+    def __init__(self,
+                 dataset: dict,
+                 name: str,
+                 transform: object = None,
+                 **kwargs):
+
+        self.data = deepcopy(dataset['images'])
+        self.targets = deepcopy(dataset['labels'])
+        self.transform = transform
+        self.name = name
+        
+        self.data_index = None
+        self.targets_index = None
+        self.set_index()
+
+    def set_index(self, indices=None):
+        if indices is not None:
+            self.data_index = self.data[indices.cpu()]
+            self.targets_index = np.array(self.targets)[indices.cpu()].tolist()
+        else:
+            self.data_index = self.data
+            self.targets_index = self.targets
+            
+    def __len__(self):
+        return len(self.data_index)
+
+    def __sample__(self, idx):
+        if self.targets is None:
+            target = None
+        else:
+            target = self.targets_index[idx]
+        img = self.data_index[idx]
+
+        return img, target
+
+    def __getitem__(self, idx):
+        
+        img, target = self.__sample__(idx)
+        if self.transform is not None:
+            weak_img = self.transform(img)
+
+        if self.name == 'train_lb':
+            return {'idx_lb': idx, 'x_lb': weak_img, 'y_lb': target}
+        elif self.name == 'train_ulb':
+            return {'idx_ulb': idx, 'x_ulb_w': weak_img, 'x_ulb_s': self.transform.strong_transform(img), 'y_ulb': target}
+        elif self.name == 'train_ulb_selected':
+            return {'x_ulb_w': weak_img, 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
+        else:
+            raise ValueError

@@ -11,4 +11,5 @@
 --seed=1
 --mixed-precision
 --pi=0.00001
---wandb-proj-v=-v1
+--wandb-proj-v=-v4
+--start-fix=1
