@@ -198,7 +198,7 @@ class Classification(Task):
                                                                                                         torch.ones_like(label_y.long())]),2)).sum(1)
                     
                     l_ul_cls_loss = l_ul_cls_losses.mean()
-                    used_unlabeled_index = (unlabel_confidence>tau) & (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef))
+                    used_unlabeled_index = (unlabel_confidence>tau) | (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef))
                     or_used_unlabeled_index = (unlabel_confidence>tau) | (l_ul_cls_losses[label_y.size(0):-label_y.size(0)].detach()>(pi*warm_up_coef))
                     
                     if smoothing_proposed is not None:
