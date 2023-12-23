@@ -184,7 +184,7 @@ class Classification(Task):
                     label_logit, _, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
-                    l_ul_cls_losses = -(self.backbone.mlp(full_features).log_softmax(1)*nn.functional.one_hot(torch.cat([torch.zeros_like(label_y.long()),torch.ones_like(label_y.long()),torch.ones_like(label_y.long())]),2)).sum(1)
+                    l_ul_cls_losses = -(self.backbone.mlp(full_features[:-unlabel_strong_x.size(0)]).log_softmax(1)*nn.functional.one_hot(torch.cat([torch.zeros_like(label_y.long()),torch.ones_like(label_y.long())]),2)).sum(1)
                     l_ul_cls_loss = l_ul_cls_losses.mean()
 
                     if smoothing_proposed is not None:
