@@ -75,7 +75,7 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_fix,current_epoch=epoch,pi=pi)
+            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_fix*2,current_epoch=epoch,pi=pi)
 
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
@@ -181,7 +181,7 @@ class Classification(Task):
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
 
                     full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x],axis=0))
-                    label_logit, _, _ = full_logits.split(label_y.size(0))
+                    label_logit, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     l_ul_cls_losses = -(self.backbone.mlp(full_features).log_softmax(1)*nn.functional.one_hot(torch.cat([torch.zeros_like(label_y.long()),torch.ones_like(label_y.long())]),2)).sum(1)
