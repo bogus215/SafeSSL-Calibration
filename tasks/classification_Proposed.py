@@ -51,9 +51,6 @@ class Classification(Task):
         l_sampler = DistributedSampler(dataset=train_set[0], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
         l_loader = DataLoader(train_set[0],batch_size=self.batch_size//2, sampler=l_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
 
-        u_sampler = DistributedSampler(dataset=train_set[1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
-        u_loader = DataLoader(train_set[1],batch_size=self.batch_size//2, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
-        
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
 
@@ -75,13 +72,13 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_fix*2,current_epoch=epoch,pi=pi)
+            self.exclude_dataset(labeled_dataset=train_set[0],unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=int(start_fix*4),current_epoch=epoch,pi=pi)
 
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
-            train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
+            train_history, cls_wise_results = self.train(l_loader,selected_u_loader,
                                                          tau=tau,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
@@ -142,10 +139,10 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, selected_unlabel_loader, current_epoch, start_fix, tau, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
-        iteration = len(unlabel_loader)
+        iteration = len(selected_unlabel_loader)
 
         self._set_learning_phase(train=True)
         result = {
@@ -156,8 +153,7 @@ class Classification(Task):
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
             "cali_temp": torch.zeros(iteration, device=self.local_rank),
-            'cali_loss': torch.zeros(iteration, device=self.local_rank),
-            'l_ul_cls_loss' : torch.zeros(iteration, device=self.local_rank)
+            'cali_loss': torch.zeros(iteration, device=self.local_rank)
         }
         
         if self.backbone.class_num==6:
@@ -172,20 +168,20 @@ class Classification(Task):
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Training...", total=iteration)
 
-            for i, (data_lb, data_ulb, data_ulb_selected) in enumerate(zip(label_loader, unlabel_loader, selected_unlabel_loader)):
+            for i, (data_lb, data_ulb_selected) in enumerate(zip(label_loader, selected_unlabel_loader)):
                 with torch.cuda.amp.autocast(self.mixed_precision):
 
                     label_x = data_lb['x_lb'].to(self.local_rank)
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
-                    unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
+                    x_ulb_w = data_ulb_selected["x_ulb_w"].to(self.local_rank)
+                    x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x],axis=0))
-                    label_logit, _ = full_logits.split(label_y.size(0))
+                    unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
+                    full_logits = self.predict(torch.cat((label_x, x_ulb_w, x_ulb_s), 0))
 
+                    label_logit, unlabel_weak_logit, unlabel_strong_logit = full_logits.split(label_x.size(0))
                     label_loss = self.loss_function(label_logit, label_y.long())
-                    l_ul_cls_losses = -(self.backbone.mlp(full_features).log_softmax(1)*nn.functional.one_hot(torch.cat([torch.zeros_like(label_y.long()),torch.ones_like(label_y.long())]),2)).sum(1)
-                    l_ul_cls_loss = l_ul_cls_losses.mean()
 
                     if smoothing_proposed is not None:
 
@@ -226,28 +222,19 @@ class Classification(Task):
 
                         cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
                         label_loss += cali_coef*cali_loss
-                    
+                        
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     if current_epoch >= start_fix:
 
-                        x_ulb_w = data_ulb_selected["x_ulb_w"].to(self.local_rank)
-                        x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
-
-                        unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
-
-                        inputs_selected = torch.cat((x_ulb_w, x_ulb_s), 0)
-                        selected_logits = self.backbone(inputs_selected)
-                        unlabel_weak_logit, unlabel_strong_logit = selected_logits.split(x_ulb_s.size(0))
                         unlabel_weak_scaled_logit = self.backbone.scaling_logits(unlabel_weak_logit)
-                        
                         unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_logit.softmax(1).max(1)
                         used_unlabeled_index = unlabel_confidence>tau
 
                         if used_unlabeled_index.sum().item() != 0:
                             unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                 
-                    loss = label_loss + unlabel_loss + l_ul_cls_loss
-
+                    loss = label_loss + unlabel_loss
+                  
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.optimizer)
@@ -263,7 +250,6 @@ class Classification(Task):
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
                 result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
-                result['l_ul_cls_loss'][i] = l_ul_cls_loss.detach()
 
                 if smoothing_proposed is not None:
                     result['cali_loss'][i] = cali_loss.detach()
@@ -638,15 +624,35 @@ class Classification(Task):
         if return_results:
             return preds, trues, FEATURE, CLS_LOSS_IN, IDX
         
-    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch, pi):
+    def exclude_dataset(self,labeled_dataset,unlabeled_dataset,selected_dataset,start_fix,current_epoch,pi):
 
+        self._set_learning_phase(train=False)
+
+        l_loader = DataLoader(dataset=labeled_dataset,
+                              batch_size=128,
+                              drop_last=False,
+                              shuffle=False,
+                              num_workers=4)
+
+        with torch.no_grad():
+            for batch_idx, data in enumerate(l_loader):
+                x = data['x_lb'].cuda(self.local_rank)
+                y = data['y_lb'].cuda(self.local_rank)
+
+                _, feature = self.get_feature(x)
+
+                if batch_idx == 0:
+                    feature_all = nn.functional.normalize(feature)
+                    label_all = y
+                else:
+                    feature_all = torch.cat([feature_all, nn.functional.normalize(feature)], 0)
+                    label_all = torch.cat([label_all, y], 0)
+                    
         loader = DataLoader(dataset=unlabeled_dataset,
                             batch_size=128,
                             drop_last=False,
                             shuffle=False,
                             num_workers=4)
-
-        self._set_learning_phase(train=False)
         
         with torch.no_grad():
             with Progress(transient=True, auto_refresh=False) as pg:
@@ -656,10 +662,20 @@ class Classification(Task):
 
                     x = data['x_ulb_w'].cuda(self.local_rank)
                     y = data['y_ulb'].cuda(self.local_rank)
-
-                    _, features = self.get_feature(x)
-                    eps_divergence = -(self.backbone.mlp(features).log_softmax(1)*nn.functional.one_hot(torch.ones_like(y),2)).sum(1)
-                    select_idx = eps_divergence > pi
+                    
+                    logit, feature = self.get_feature(x)
+                    feature = nn.functional.normalize(feature)
+                    
+                    sym_matrix = torch.matmul(feature,feature_all.T)
+                    
+                    most_similar_values = torch.zeros_like(y, dtype=torch.float)
+                    pseudo_labels = logit.argmax(-1)
+                    for i in range(len(pseudo_labels)):
+                        pseudo_label = pseudo_labels[i]
+                        mask = pseudo_label == label_all
+                        most_similar_values[i] = (sym_matrix[i, mask].max()).item()
+                        
+                    select_idx = most_similar_values > pi
                     gt_idx = y < self.backbone.class_num
 
                     if batch_idx == 0:

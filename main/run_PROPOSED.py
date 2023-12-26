@@ -17,7 +17,6 @@ from models import WRN, densenet121, vgg16_bn, inceptionv4
 from tasks.classification_Proposed import Classification
 
 from utils.logging import get_rich_logger
-from utils.initialization import initialize_weights
 from utils.wandb import configure_wandb
 from utils.gpu import set_gpu
 
@@ -84,29 +83,7 @@ def main_worker(local_rank: int, config: object):
     
     # Sub-Network Plus
     import torch.nn as nn
-    class LULClassifier(nn.Module):
-        def __init__(self, feature, size) -> None:
-            super().__init__()
-            
-            assert size>=2
-            
-            modules = []
-            for _ in range(size-1):
-                modules.append(nn.Linear(feature,feature))
-                modules.append(nn.LayerNorm(feature))
-                modules.append(nn.LeakyReLU(0.1))
-            modules.append(nn.Linear(feature,2,bias=False))
-            
-            self.mlp = nn.Sequential(*modules)
-            
-        def forward(self,x):
-            x_ = x.detach()
-            return self.mlp(x_)
-
-    setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size))
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
-
-    initialize_weights(model)
     
     # Data (transforms & datasets)
     trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
