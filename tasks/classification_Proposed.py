@@ -8,6 +8,7 @@ from rich.progress import Progress
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score
+from skimage.filters import threshold_otsu
 
 from tasks.classification import Classification as Task
 from tasks.classification_OPENMATCH import DistributedSampler
@@ -668,29 +669,30 @@ class Classification(Task):
                     
                     sym_matrix = torch.matmul(feature,feature_all.T)
                     
-                    most_similar_values = torch.zeros_like(y, dtype=torch.float)
+                    most_similar_value = torch.zeros_like(y, dtype=torch.float)
                     pseudo_labels = logit.argmax(-1)
                     for i in range(len(pseudo_labels)):
                         pseudo_label = pseudo_labels[i]
                         mask = pseudo_label == label_all
-                        most_similar_values[i] = (sym_matrix[i, mask].max()).item()
+                        most_similar_value[i] = (sym_matrix[i, mask].max()).item()
                         
-                    select_idx = most_similar_values > pi
                     gt_idx = y < self.backbone.class_num
 
                     if batch_idx == 0:
-                        select_all = select_idx
                         gt_all = gt_idx
+                        most_similar_values = most_similar_value
                     else:
-                        select_all = torch.cat([select_all, select_idx], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
+                        most_similar_values = torch.cat([most_similar_values, most_similar_value], 0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
-        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
+        select_all = most_similar_values > threshold_otsu(most_similar_values.cpu().numpy())
+        
+        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
         select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
 
