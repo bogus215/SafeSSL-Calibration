@@ -31,7 +31,6 @@ class Classification(Task):
             open_test_set,
             save_every,
             tau,
-            pi,
             cali_coef,
             warm_up_end,
             start_fix: int =5,
@@ -73,7 +72,7 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(labeled_dataset=train_set[0],unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=int(start_fix*4),current_epoch=epoch,pi=pi)
+            self.exclude_dataset(labeled_dataset=train_set[0],unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=int(start_fix*4),current_epoch=epoch)
 
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
@@ -625,7 +624,7 @@ class Classification(Task):
         if return_results:
             return preds, trues, FEATURE, CLS_LOSS_IN, IDX
         
-    def exclude_dataset(self,labeled_dataset,unlabeled_dataset,selected_dataset,start_fix,current_epoch,pi):
+    def exclude_dataset(self,labeled_dataset,unlabeled_dataset,selected_dataset,start_fix,current_epoch):
 
         self._set_learning_phase(train=False)
 

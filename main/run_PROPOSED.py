@@ -161,7 +161,6 @@ def main_worker(local_rank: int, config: object):
         open_test_set=open_test_set,
         save_every=config.save_every,
         tau=config.tau,
-        pi=config.pi,
         cali_coef=config.cali_coef,
         warm_up_end=config.warm_up,
         start_fix=config.start_fix,
