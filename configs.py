@@ -226,12 +226,11 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--tau', type=float, default=0.95)
-        parser.add_argument('--pi', type=float, default=0.05)
         parser.add_argument('--cali-coef', type=float, default=1)
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
         parser.add_argument('--start-fix', type=int, default=5)
-        parser.add_argument('--layer-size', type=int, default=3)
+        parser.add_argument('--layer-size', type=int, default=2)
 
         return parser
 

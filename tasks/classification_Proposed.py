@@ -8,6 +8,7 @@ from rich.progress import Progress
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score
+from skimage.filters import threshold_otsu
 
 from tasks.classification import Classification as Task
 from tasks.classification_OPENMATCH import DistributedSampler
@@ -30,7 +31,6 @@ class Classification(Task):
             open_test_set,
             save_every,
             tau,
-            pi,
             cali_coef,
             warm_up_end,
             start_fix: int =5,
@@ -75,7 +75,7 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_fix,current_epoch=epoch,pi=pi)
+            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=int(start_fix*4),current_epoch=epoch)
 
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
@@ -638,7 +638,7 @@ class Classification(Task):
         if return_results:
             return preds, trues, FEATURE, CLS_LOSS_IN, IDX
         
-    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch, pi):
+    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch):
 
         loader = DataLoader(dataset=unlabeled_dataset,
                             batch_size=128,
@@ -658,23 +658,25 @@ class Classification(Task):
                     y = data['y_ulb'].cuda(self.local_rank)
 
                     _, features = self.get_feature(x)
-                    eps_divergence = -(self.backbone.mlp(features).log_softmax(1)*nn.functional.one_hot(torch.ones_like(y),2)).sum(1)
-                    select_idx = eps_divergence > pi
+                    eps = -(self.backbone.mlp(features).log_softmax(1)*nn.functional.one_hot(torch.ones_like(y),2)).sum(1)
+                    h_div = 2*(1-2*eps)
                     gt_idx = y < self.backbone.class_num
 
                     if batch_idx == 0:
-                        select_all = select_idx
                         gt_all = gt_idx
+                        h_div_values = h_div
                     else:
-                        select_all = torch.cat([select_all, select_idx], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
+                        h_div_values = torch.cat([h_div_values, h_div], 0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
-        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
+        select_all = h_div_values < threshold_otsu(h_div_values.cpu().numpy())
+        
+        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
         select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
 
