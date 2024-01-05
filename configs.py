@@ -161,22 +161,6 @@ class ConfigBase(object):
 
         return parser
 
-class SLConfig(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(SLConfig, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "SL"
-
 class FIXMATCHConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
         super(FIXMATCHConfig, self).__init__(args, **kwargs)
@@ -194,27 +178,6 @@ class FIXMATCHConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "FIXMATCH"
-
-class CaliMATCHConfig(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(CaliMATCHConfig, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--tau', type=float, default=0.95)
-        parser.add_argument('--consis-coef', type=float, default=1)
-        parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
-        parser.add_argument('--swa-on', action='store_true', help='swa optimizer on.')
-        parser.add_argument('--swa-start-iter', default=100000, type=int)
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "CaliMATCH"
 
 class ProposedConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
@@ -237,63 +200,6 @@ class ProposedConfig(ConfigBase):
     def task(self) -> str:
         return "Proposed"
 
-class Ablation1Config(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(Ablation1Config, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--tau', type=float, default=0.95)
-        parser.add_argument('--cali-coef', type=float, default=1)
-        parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
-        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "Ablation1"
-    
-class Ablation2Config(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(Ablation2Config, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--tau', type=float, default=0.95)
-        parser.add_argument('--pi', type=float, default=0.05)
-        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "Ablation2"
-
-class Ablation3Config(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(Ablation3Config, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--tau', type=float, default=0.95)
-        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "Ablation3"
-    
 class IOMATCHConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
         super(IOMATCHConfig, self).__init__(args, **kwargs)
@@ -332,88 +238,3 @@ class OPENMATCHConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "OPENMATCH"
-
-class PseudoLabelConfig(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(PseudoLabelConfig, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--consis-coef', type=float, default=1)
-        parser.add_argument('--threshold', type=float, default=0.95)
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "PseudoLabel"
-
-class VATConfig(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(VATConfig, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--consis-coef', type=float, default=0.3)
-        parser.add_argument('--xi', type=float, default=1e-6)
-        parser.add_argument('--eps', type=float, default=6)
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "VAT"
-
-class MixMatchConfig(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(MixMatchConfig, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--consis-coef', type=float, default=100)
-        parser.add_argument('--alpha', type=float, default=.75)
-        parser.add_argument('--T', type=float, default=0.5)
-        parser.add_argument('--K', type=int, default=2)
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "MixMatch"
-
-class TestingSLConfig(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(TestingSLConfig, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--checkpoint-hash', type=str, default= "2023-01-12_03-30-35" , help='')
-
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "SL"
-
-    @property
-    def checkpoint_dir(self) -> str:
-        ckpt = os.path.join(
-            self.checkpoint_root,
-            self.data,          
-            self.task,          
-            self.model_name,    
-            self.checkpoint_hash
-            )
-        os.makedirs(ckpt, exist_ok=True)
-        return ckpt
