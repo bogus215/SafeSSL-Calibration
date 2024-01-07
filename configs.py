@@ -193,6 +193,8 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
         parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
+        parser.add_argument('--focal-gamma', type=float, default=2, help='Gamma(Focal loss) of ova loss')
 
         return parser
 

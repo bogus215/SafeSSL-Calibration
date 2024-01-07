@@ -32,7 +32,8 @@ class Classification(Task):
             save_every,
             tau,
             cali_coef,
-            warm_up_end,
+            lambda_socr,
+            focal_gamma,
             start_fix: int =5,
             n_bins: int = 15,
             train_n_bins: int = 30,
@@ -43,7 +44,7 @@ class Classification(Task):
         if not self.prepared:
             raise RuntimeError("Training not prepared.")
 
-        # DataLoader (train, val, test)
+        # DataLoader
         epochs = self.iterations // save_every
         per_epoch_steps = self.iterations // epochs
         num_samples = per_epoch_steps * self.batch_size // 2 
@@ -51,7 +52,10 @@ class Classification(Task):
         l_sampler = DistributedSampler(dataset=train_set[0], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
         l_loader = DataLoader(train_set[0],batch_size=self.batch_size//2, sampler=l_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
 
-        eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
+        u_sampler = DistributedSampler(dataset=train_set[1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
+        unlabel_loader = DataLoader(train_set[1],batch_size=self.batch_size//2, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
+
+        eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         # Logging
@@ -61,7 +65,6 @@ class Classification(Task):
         best_eval_acc = -float('inf')
         best_epoch    = 0
 
-        self.warm_up_end = warm_up_end
         self.trained_iteration = 0
         
         if self.ckpt_dir.split("/")[2] in ['cifar10','svhn'] and enable_plot:
@@ -72,14 +75,14 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(labeled_dataset=train_set[0],unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=int(start_fix*4),current_epoch=epoch)
+            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=int(start_fix*4),current_epoch=epoch)
 
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
-            train_history, cls_wise_results = self.train(l_loader,selected_u_loader,
-                                                         tau=tau,cali_coef=cali_coef,
+            train_history, cls_wise_results = self.train(l_loader,unlabel_loader,selected_u_loader,
+                                                         tau=tau,focal_gamma=focal_gamma,lambda_socr=lambda_socr,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
@@ -139,7 +142,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, selected_unlabel_loader, current_epoch, start_fix, tau, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, focal_gamma, lambda_socr, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(selected_unlabel_loader)
@@ -168,21 +171,30 @@ class Classification(Task):
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Training...", total=iteration)
 
-            for i, (data_lb, data_ulb_selected) in enumerate(zip(label_loader, selected_unlabel_loader)):
+            for i, (data_lb, data_ulb, data_ulb_selected) in enumerate(zip(label_loader, unlabel_loader, selected_unlabel_loader)):
                 with torch.cuda.amp.autocast(self.mixed_precision):
 
                     label_x = data_lb['x_lb'].to(self.local_rank)
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
+                    x_ulb_w_0  = data_ulb["x_ulb_w"].to(self.local_rank)
+                    x_ulb_w_1 = data_ulb["x_ulb_w_1"].to(self.local_rank)
+
                     x_ulb_w = data_ulb_selected["x_ulb_w"].to(self.local_rank)
                     x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
 
                     unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
-                    full_logits = self.predict(torch.cat((label_x, x_ulb_w, x_ulb_s), 0))
 
-                    label_logit, unlabel_weak_logit, unlabel_strong_logit = full_logits.split(label_x.size(0))
+                    logits, features = self.get_feature(torch.cat((label_x, x_ulb_w_0, x_ulb_w_1), 0))
+                    logits_open = self.backbone.ova_classifiers(features)
+                    
+                    logits_open_lb, logits_open_ulb_0, logits_open_ulb_1 = logits_open.chunk(3)
+                    
+                    label_logit = logits[:label_x.size(0)]
+
                     label_loss = self.loss_function(label_logit, label_y.long())
-
+                    label_loss += self.focal_ova_loss_func(logits_open_lb,label_y.long(),gamma=focal_gamma)
+                   
                     if smoothing_proposed is not None:
 
                         smoothing_proposed_surgery = dict()
@@ -223,9 +235,12 @@ class Classification(Task):
                         cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
                         label_loss += cali_coef*cali_loss
                         
-                    unlabel_loss = torch.zeros(1).to(self.local_rank)
+                    unlabel_loss = lambda_socr*self.socr_loss_func(logits_open_ulb_0, logits_open_ulb_1)
+
                     if current_epoch >= start_fix:
 
+                        unlabel_weak_logit, unlabel_strong_logit = self.predict(torch.cat([x_ulb_w,x_ulb_s],axis=0)).chunk(2)
+                        
                         unlabel_weak_scaled_logit = self.backbone.scaling_logits(unlabel_weak_logit)
                         unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_logit.softmax(1).max(1)
                         used_unlabeled_index = unlabel_confidence>tau
@@ -624,35 +639,15 @@ class Classification(Task):
         if return_results:
             return preds, trues, FEATURE, CLS_LOSS_IN, IDX
         
-    def exclude_dataset(self,labeled_dataset,unlabeled_dataset,selected_dataset,start_fix,current_epoch):
+    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch):
 
-        self._set_learning_phase(train=False)
-
-        l_loader = DataLoader(dataset=labeled_dataset,
-                              batch_size=128,
-                              drop_last=False,
-                              shuffle=False,
-                              num_workers=4)
-
-        with torch.no_grad():
-            for batch_idx, data in enumerate(l_loader):
-                x = data['x_lb'].cuda(self.local_rank)
-                y = data['y_lb'].cuda(self.local_rank)
-
-                _, feature = self.get_feature(x)
-
-                if batch_idx == 0:
-                    feature_all = nn.functional.normalize(feature)
-                    label_all = y
-                else:
-                    feature_all = torch.cat([feature_all, nn.functional.normalize(feature)], 0)
-                    label_all = torch.cat([label_all, y], 0)
-                    
         loader = DataLoader(dataset=unlabeled_dataset,
                             batch_size=128,
                             drop_last=False,
                             shuffle=False,
                             num_workers=4)
+
+        self._set_learning_phase(train=False)
         
         with torch.no_grad():
             with Progress(transient=True, auto_refresh=False) as pg:
@@ -662,36 +657,29 @@ class Classification(Task):
 
                     x = data['x_ulb_w'].cuda(self.local_rank)
                     y = data['y_ulb'].cuda(self.local_rank)
-                    
-                    logit, feature = self.get_feature(x)
-                    feature = nn.functional.normalize(feature)
-                    
-                    sym_matrix = torch.matmul(feature,feature_all.T)
-                    
-                    most_similar_value = torch.zeros_like(y, dtype=torch.float)
-                    pseudo_labels = logit.argmax(-1)
-                    for i in range(len(pseudo_labels)):
-                        pseudo_label = pseudo_labels[i]
-                        mask = pseudo_label == label_all
-                        most_similar_value[i] = (sym_matrix[i, mask].max()).item()
-                        
-                    gt_idx = y < self.backbone.class_num
 
+                    logits, feature = self.get_feature(x)
+                    logits_open = self.backbone.ova_classifiers(feature)
+                    logits = nn.functional.softmax(logits, 1)
+                    logits_open = nn.functional.softmax(logits_open.view(logits_open.size(0), 2, -1), 1)
+                    tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
+                    pred_close = logits.data.max(1)[1]
+                    unk_score = logits_open[tmp_range, 0, pred_close]
+                    select_idx = unk_score < 0.5
+                    gt_idx = y < self.backbone.class_num
                     if batch_idx == 0:
+                        select_all = select_idx
                         gt_all = gt_idx
-                        most_similar_values = most_similar_value
                     else:
+                        select_all = torch.cat([select_all, select_idx], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
-                        most_similar_values = torch.cat([most_similar_values, most_similar_value], 0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
-        select_all = most_similar_values > threshold_otsu(most_similar_values.cpu().numpy())
-        
-        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
         select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
 
@@ -708,3 +696,32 @@ class Classification(Task):
         if current_epoch >= start_fix:
             if len(selected_idx) > 0:
                 selected_dataset.set_index(selected_idx)
+                
+    def focal_ova_loss_func(self, logits_open, label, gamma : int = 0):
+        logits_open = logits_open.view(logits_open.size(0), 2, -1)
+        probs_open = nn.functional.softmax(logits_open, 1)
+
+        label_s_sp = torch.zeros((probs_open.size(0),
+                                probs_open.size(2))).long().to(label.device)
+        label_range = torch.arange(0, probs_open.size(0)).long()
+        label_s_sp[label_range, label] = 1
+        label_sp_neg = 1 - label_s_sp
+
+        pos_pt = (probs_open[:, 1, :]*label_s_sp).sum(1)
+        neg_pt = torch.min(probs_open[:,0,:][label_sp_neg.bool()].view(logits_open.size(0),self.backbone.class_num-1),axis=1)[0]
+        
+        pos_focal_losses = -1 * (1-pos_pt)**gamma * torch.log(pos_pt+1e-8)
+        neg_focal_losses = -1 * (1-neg_pt)**gamma * torch.log(neg_pt+1e-8)
+        
+        return pos_focal_losses.mean()+neg_focal_losses.mean()
+    
+    @staticmethod    
+    def socr_loss_func(logits_open_u1, logits_open_u2):
+        # Eq.(3) in the paper
+        logits_open_u1 = logits_open_u1.view(logits_open_u1.size(0), 2, -1)
+        logits_open_u2 = logits_open_u2.view(logits_open_u2.size(0), 2, -1)
+        logits_open_u1 = nn.functional.softmax(logits_open_u1, 1)
+        logits_open_u2 = nn.functional.softmax(logits_open_u2, 1)
+        l_socr = torch.mean(torch.sum(torch.sum(torch.abs(
+            logits_open_u1 - logits_open_u2) ** 2, 1), 1))
+        return l_socr
