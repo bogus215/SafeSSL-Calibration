@@ -16,6 +16,7 @@ from datasets.transforms import SemiAugment, TestAugment
 from models import WRN, densenet121, vgg16_bn, inceptionv4
 from tasks.classification_Proposed import Classification
 
+from utils.initialization import initialize_weights
 from utils.logging import get_rich_logger
 from utils.wandb import configure_wandb
 from utils.gpu import set_gpu
@@ -84,6 +85,9 @@ def main_worker(local_rank: int, config: object):
     # Sub-Network Plus
     import torch.nn as nn
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+    setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
+
+    initialize_weights(model)
     
     # Data (transforms & datasets)
     trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
@@ -162,11 +166,13 @@ def main_worker(local_rank: int, config: object):
         save_every=config.save_every,
         tau=config.tau,
         cali_coef=config.cali_coef,
-        warm_up_end=config.warm_up,
         start_fix=config.start_fix,
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,
+        lambda_socr=config.lambda_socr,
+        lambda_ova=config.lambda_ova,
+        focal_gamma=config.focal_gamma,
         logger=logger
     )
     elapsed_sec = time.time() - start

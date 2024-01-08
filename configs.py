@@ -154,7 +154,7 @@ class ConfigBase(object):
         """Returns an `argparse.ArgumentParser` instance containing logging-related arguments."""
         parser = argparse.ArgumentParser("Logging", add_help=False)
         parser.add_argument('--checkpoint-root', type=str, default='./checkpoints/', help='Top-level directory of checkpoints.')
-        parser.add_argument('--save-every', type=int, default=10000, help='Save model checkpoint every `save_every` epochs.')
+        parser.add_argument('--save-every', type=int, default=5000, help='Save model checkpoint every `save_every` epochs.')
         parser.add_argument('--enable-wandb', action='store_true', help='Use Weights & Biases plugin.')
         parser.add_argument('--wandb-proj-v', type=str, default="")
         parser.add_argument('--enable-plot', action='store_true', help='Plotting unlabeled and testing dataset - TSNE.')
@@ -230,7 +230,10 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
         parser.add_argument('--start-fix', type=int, default=5)
-
+        parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
+        parser.add_argument('--lambda-ova', type=float, default=0.5, help='')
+        parser.add_argument('--focal-gamma', type=float, default=2, help='Gamma(Focal loss) of ova loss')
+        
         return parser
 
     @property
