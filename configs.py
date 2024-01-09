@@ -231,6 +231,7 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
         parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--layer-size', type=int, default=3)
+        parser.add_argument('--lambda-weight', type=float, default=1e-5)
         parser.add_argument('--focal-gamma', type=float, default=2, help='Gamma(Focal loss) of ova loss')
         
         return parser

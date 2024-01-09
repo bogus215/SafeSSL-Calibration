@@ -183,9 +183,7 @@ class Classification(Task):
                     label_logit, _, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
-                    l_ul_cls_loss = self.focal_loss_func(logits_open=self.backbone.mlp(full_features),
-                                                         label=torch.cat((torch.zeros_like(label_y.long()),torch.ones_like(label_y.long()).repeat(2))),
-                                                         gamma=focal_gamma)
+                    l_ul_cls_loss = self.focal_loss_func(logits_open=self.backbone.mlp(full_features),label=torch.cat((torch.zeros_like(label_y.long()),torch.ones_like(label_y.long()).repeat(2))),gamma=focal_gamma) + self.backbone.mlp.l2_norm_loss()
                     
                     if smoothing_proposed is not None:
 
