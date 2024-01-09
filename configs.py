@@ -229,6 +229,7 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--cali-coef', type=float, default=1)
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+        parser.add_argument('--bn-stats-fix', action='store_true', help = "")
         parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--layer-size', type=int, default=3)
         parser.add_argument('--lambda-weight', type=float, default=1e-5)

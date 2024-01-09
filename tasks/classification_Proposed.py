@@ -32,6 +32,7 @@ class Classification(Task):
             tau,
             cali_coef,
             lambda_em,
+            bn_stats_fix,
             start_fix: int =5,
             n_bins: int = 15,
             train_n_bins: int = 30,
@@ -64,6 +65,7 @@ class Classification(Task):
         best_epoch    = 0
 
         self.trained_iteration = 0
+        self.bn_stats_fix = bn_stats_fix
         
         if self.ckpt_dir.split("/")[2] in ['cifar10','svhn'] and enable_plot:
             label_loader = DataLoader(train_set[0],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
@@ -177,9 +179,9 @@ class Classification(Task):
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
-                    unlabel_weak_x_1 = data_ulb["x_ulb_w_1"].to(self.local_rank)
+                    unlabel_strong_x = data_ulb["x_ulb_s"].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_weak_x_1],axis=0))
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
                     label_logit, _, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
@@ -210,7 +212,15 @@ class Classification(Task):
                         unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
 
                         inputs_selected = torch.cat((x_ulb_w, x_ulb_s), 0)
+                        
+                        if self.bn_stats_fix:
+                            self.backbone.update_batch_stats(False)
+
                         selected_logits = self.backbone(inputs_selected)
+
+                        if self.bn_stats_fix:
+                            self.backbone.update_batch_stats(True)
+
                         unlabel_weak_logit, unlabel_strong_logit = selected_logits.split(x_ulb_s.size(0))
                         unlabel_weak_scaled_logit = self.backbone.scaling_logits(unlabel_weak_logit)
                         

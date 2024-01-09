@@ -202,6 +202,7 @@ def main_worker(local_rank: int, config: object):
         train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,
         lambda_em=config.lambda_em,
+        bn_stats_fix=config.bn_stats_fix,
         logger=logger
     )
     elapsed_sec = time.time() - start
