@@ -31,7 +31,7 @@ class Classification(Task):
             save_every,
             tau,
             cali_coef,
-            focal_gamma,
+            lambda_em,
             start_fix: int =5,
             n_bins: int = 15,
             train_n_bins: int = 30,
@@ -80,7 +80,7 @@ class Classification(Task):
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
             train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
-                                                         tau=tau,focal_gamma=focal_gamma,cali_coef=cali_coef,
+                                                         tau=tau,lambda_em=lambda_em,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
@@ -140,7 +140,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, focal_gamma, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, lambda_em, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(selected_unlabel_loader)
@@ -177,13 +177,12 @@ class Classification(Task):
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
-                    unlabel_strong_x = data_ulb["x_ulb_s"].to(self.local_rank)
+                    unlabel_weak_x_1 = data_ulb["x_ulb_w_1"].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_weak_x_1],axis=0))
                     label_logit, _, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
-                    l_ul_cls_loss = self.focal_loss_func(logits_open=self.backbone.mlp(full_features),label=torch.cat((torch.zeros_like(label_y.long()),torch.ones_like(label_y.long()).repeat(2))),gamma=focal_gamma) + self.backbone.mlp.l2_norm_loss()
                     
                     if smoothing_proposed is not None:
 
@@ -199,6 +198,9 @@ class Classification(Task):
                         label_loss += cali_coef*cali_loss
                         
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
+                    
+                    l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),torch.ones_like(label_y.long()).repeat(2)))
+                    l_ul_cls_loss = self.cross_H_loss_func(self.backbone.mlp(full_features), l_ul_labels, lambda_em) + self.backbone.mlp.l2_norm_loss()
 
                     if current_epoch >= start_fix:
 
@@ -663,14 +665,16 @@ class Classification(Task):
             if len(selected_idx) > 0:
                 selected_dataset.set_index(selected_idx)
                 
-    def focal_loss_func(self, logits_open, label, gamma : int = 0):
+    def cross_H_loss_func(self, logits_open, label, lambda_em):
 
         probs_open = logits_open.softmax(1)
-        pos_pt = probs_open.gather(1,label.unsqueeze(1)).squeeze(1)
 
-        pos_focal_losses = -1 * (1-pos_pt)**gamma * torch.log(pos_pt+1e-8)
+        pos_pt = probs_open.gather(1,label.unsqueeze(1)).squeeze(1)
+        pos_losses = -torch.log(pos_pt+1e-8)
         
-        return pos_focal_losses.mean()
+        entropy_losses = torch.sum(-probs_open * torch.log(probs_open + 1e-8),1)
+        
+        return pos_losses.mean() + lambda_em*entropy_losses.mean()
     
     @staticmethod
     def clamp(smoothing_proposed):

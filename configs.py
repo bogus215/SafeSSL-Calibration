@@ -232,7 +232,7 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--layer-size', type=int, default=3)
         parser.add_argument('--lambda-weight', type=float, default=1e-5)
-        parser.add_argument('--focal-gamma', type=float, default=2, help='Gamma(Focal loss) of ova loss')
+        parser.add_argument('--lambda-em', type=float, default=0.1, help='')
         
         return parser
 

@@ -85,10 +85,12 @@ def main_worker(local_rank: int, config: object):
     # Sub-Network Plus
     import torch.nn as nn
     class LULClassifier(nn.Module):
-        def __init__(self, feature, size) -> None:
+        def __init__(self, feature, size, lambda_weight : float = 1e-5) -> None:
             super().__init__()
             
             assert size>=2
+            
+            self.lambda_weight = lambda_weight
             
             modules = []
             for _ in range(size-1):
@@ -102,8 +104,18 @@ def main_worker(local_rank: int, config: object):
         def forward(self,x):
             x_ = x.detach()
             return self.mlp(x_)
+        
+        def l2_norm_loss(self):
 
-    setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size))
+            sum_of_squares = 0
+            for param in self.mlp.parameters():
+                sum_of_squares += torch.sum(torch.pow(param, 2))
+
+            weights_reg = self.lambda_weight * sum_of_squares
+
+            return weights_reg
+            
+    setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size, lambda_weight=config.lambda_weight))
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
     
     initialize_weights(model)
@@ -189,7 +201,7 @@ def main_worker(local_rank: int, config: object):
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,
-        focal_gamma=config.focal_gamma,
+        lambda_em=config.lambda_em,
         logger=logger
     )
     elapsed_sec = time.time() - start
