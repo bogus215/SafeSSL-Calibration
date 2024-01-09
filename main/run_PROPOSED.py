@@ -84,9 +84,28 @@ def main_worker(local_rank: int, config: object):
     
     # Sub-Network Plus
     import torch.nn as nn
-    setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
-    setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
+    class LULClassifier(nn.Module):
+        def __init__(self, feature, size) -> None:
+            super().__init__()
+            
+            assert size>=2
+            
+            modules = []
+            for _ in range(size-1):
+                modules.append(nn.Linear(feature,feature))
+                modules.append(nn.LayerNorm(feature))
+                modules.append(nn.LeakyReLU(0.1))
+            modules.append(nn.Linear(feature,2,bias=False))
+            
+            self.mlp = nn.Sequential(*modules)
+            
+        def forward(self,x):
+            x_ = x.detach()
+            return self.mlp(x_)
 
+    setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size))
+    setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+    
     initialize_weights(model)
     
     # Data (transforms & datasets)
@@ -170,8 +189,6 @@ def main_worker(local_rank: int, config: object):
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,
-        lambda_socr=config.lambda_socr,
-        lambda_ova=config.lambda_ova,
         focal_gamma=config.focal_gamma,
         logger=logger
     )

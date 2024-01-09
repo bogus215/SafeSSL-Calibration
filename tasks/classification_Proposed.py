@@ -31,8 +31,6 @@ class Classification(Task):
             save_every,
             tau,
             cali_coef,
-            lambda_socr,
-            lambda_ova,
             focal_gamma,
             start_fix: int =5,
             n_bins: int = 15,
@@ -53,9 +51,9 @@ class Classification(Task):
         l_loader = DataLoader(train_set[0],batch_size=self.batch_size//2, sampler=l_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         u_sampler = DistributedSampler(dataset=train_set[1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
-        unlabel_loader = DataLoader(train_set[1],batch_size=self.batch_size//2, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
-
-        eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
+        u_loader = DataLoader(train_set[1],batch_size=self.batch_size//2, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
+        
+        eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         # Logging
@@ -81,8 +79,8 @@ class Classification(Task):
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
-            train_history, cls_wise_results = self.train(l_loader,unlabel_loader,selected_u_loader,
-                                                         tau=tau,focal_gamma=focal_gamma,lambda_ova=lambda_ova,lambda_socr=lambda_socr,cali_coef=cali_coef,
+            train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
+                                                         tau=tau,focal_gamma=focal_gamma,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
@@ -142,7 +140,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, focal_gamma, lambda_ova, lambda_socr, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, focal_gamma, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(selected_unlabel_loader)
@@ -156,7 +154,8 @@ class Classification(Task):
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
             "cali_temp": torch.zeros(iteration, device=self.local_rank),
-            'cali_loss': torch.zeros(iteration, device=self.local_rank)
+            'cali_loss': torch.zeros(iteration, device=self.local_rank),
+            'l_ul_cls_loss' : torch.zeros(iteration, device=self.local_rank)            
         }
         
         if self.backbone.class_num==6:
@@ -177,57 +176,23 @@ class Classification(Task):
                     label_x = data_lb['x_lb'].to(self.local_rank)
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
-                    x_ulb_w_0  = data_ulb["x_ulb_w"].to(self.local_rank)
-                    x_ulb_w_1 = data_ulb["x_ulb_w_1"].to(self.local_rank)
+                    unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
+                    unlabel_strong_x = data_ulb["x_ulb_s"].to(self.local_rank)
 
-                    x_ulb_w = data_ulb_selected["x_ulb_w"].to(self.local_rank)
-                    x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
-
-                    unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
-
-                    logits, features = self.get_feature(torch.cat((label_x, x_ulb_w_0, x_ulb_w_1), 0))
-                    logits_open = self.backbone.ova_classifiers(features)
-                    
-                    logits_open_lb, logits_open_ulb_0, logits_open_ulb_1 = logits_open.chunk(3)
-                    
-                    label_logit = logits[:label_x.size(0)]
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
+                    label_logit, _, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
-                    label_loss += lambda_ova*self.focal_ova_loss_func(logits_open_lb,label_y.long(),gamma=focal_gamma)
+                    l_ul_cls_loss = self.focal_loss_func(logits_open=self.backbone.mlp(full_features),
+                                                         label=torch.cat((torch.zeros_like(label_y.long()),torch.ones_like(label_y.long()).repeat(2))),
+                                                         gamma=focal_gamma)
                     
                     if smoothing_proposed is not None:
 
-                        smoothing_proposed_surgery = dict()
-                        for index_, (key_, value_) in enumerate(smoothing_proposed.items()):
-                            if value_ is None:
-                                smoothing_proposed_surgery[key_] = None
-                            else:
-                                if index_ != (len(smoothing_proposed)-1):
-                                    if key_<=value_<=list(smoothing_proposed.keys())[index_+1]:
-                                        smoothing_proposed_surgery[key_] = value_
-                                    elif value_<key_:
-                                        smoothing_proposed_surgery[key_] = key_
-                                    else:
-                                        smoothing_proposed_surgery[key_] = list(smoothing_proposed.keys())[index_+1]
-                                else:
-                                    if key_<=value_<=1:
-                                        smoothing_proposed_surgery[key_] = value_
-                                    elif value_<key_:
-                                        smoothing_proposed_surgery[key_] = key_
-                                    else:
-                                        smoothing_proposed_surgery[key_] = 1
+                        smoothing_proposed_surgery = self.clamp(smoothing_proposed)
 
                         labeled_confidence = label_logit.softmax(dim=-1).max(1)[0].detach()
-                        label_confidence_surgery = labeled_confidence.clone()
-
-                        for index_, (key_, value_) in enumerate(smoothing_proposed_surgery.items()):
-                            if index_ != (len(smoothing_proposed_surgery)-1):
-                                mask_ = ((labeled_confidence > key_) & (labeled_confidence <= list(smoothing_proposed_surgery.keys())[index_+1]))
-                            else:
-                                mask_ = ((labeled_confidence > key_) & (labeled_confidence <= 1))
-
-                            if value_ is not None:
-                                label_confidence_surgery[mask_] = value_
+                        label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery)
 
                         for_one_hot_label = nn.functional.one_hot(label_y,num_classes=self.backbone.output.out_features)
                         for_smoothoed_target_label = (label_confidence_surgery.view(-1,1)*(for_one_hot_label==1) + ((1-label_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_label!=1))
@@ -235,20 +200,27 @@ class Classification(Task):
                         cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
                         label_loss += cali_coef*cali_loss
                         
-                    unlabel_loss = lambda_socr*self.socr_loss_func(logits_open_ulb_0, logits_open_ulb_1)
+                    unlabel_loss = torch.zeros(1).to(self.local_rank)
 
                     if current_epoch >= start_fix:
 
-                        unlabel_weak_logit, unlabel_strong_logit = self.predict(torch.cat([x_ulb_w,x_ulb_s],axis=0)).chunk(2)
-                        
+                        x_ulb_w = data_ulb_selected["x_ulb_w"].to(self.local_rank)
+                        x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
+
+                        unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
+
+                        inputs_selected = torch.cat((x_ulb_w, x_ulb_s), 0)
+                        selected_logits = self.backbone(inputs_selected)
+                        unlabel_weak_logit, unlabel_strong_logit = selected_logits.split(x_ulb_s.size(0))
                         unlabel_weak_scaled_logit = self.backbone.scaling_logits(unlabel_weak_logit)
+                        
                         unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_logit.softmax(1).max(1)
                         used_unlabeled_index = unlabel_confidence>tau
 
                         if used_unlabeled_index.sum().item() != 0:
                             unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                 
-                    loss = label_loss + unlabel_loss
+                    loss = label_loss + unlabel_loss + l_ul_cls_loss
                   
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward()
@@ -265,6 +237,7 @@ class Classification(Task):
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
                 result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
+                result['l_ul_cls_loss'][i] = l_ul_cls_loss.detach()
 
                 if smoothing_proposed is not None:
                     result['cali_loss'][i] = cali_loss.detach()
@@ -658,15 +631,10 @@ class Classification(Task):
                     x = data['x_ulb_w'].cuda(self.local_rank)
                     y = data['y_ulb'].cuda(self.local_rank)
 
-                    logits, feature = self.get_feature(x)
-                    logits_open = self.backbone.ova_classifiers(feature)
-                    logits = nn.functional.softmax(logits, 1)
-                    logits_open = nn.functional.softmax(logits_open.view(logits_open.size(0), 2, -1), 1)
-                    tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
-                    pred_close = logits.data.max(1)[1]
-                    unk_score = logits_open[tmp_range, 0, pred_close]
-                    select_idx = unk_score < 0.5
+                    _, features = self.get_feature(x)
+                    select_idx = self.backbone.mlp(features).softmax(1)[:,0] > 0.5
                     gt_idx = y < self.backbone.class_num
+
                     if batch_idx == 0:
                         select_all = select_idx
                         gt_all = gt_idx
@@ -697,31 +665,52 @@ class Classification(Task):
             if len(selected_idx) > 0:
                 selected_dataset.set_index(selected_idx)
                 
-    def focal_ova_loss_func(self, logits_open, label, gamma : int = 0):
-        logits_open = logits_open.view(logits_open.size(0), 2, -1)
-        probs_open = nn.functional.softmax(logits_open, 1)
+    def focal_loss_func(self, logits_open, label, gamma : int = 0):
 
-        label_s_sp = torch.zeros((probs_open.size(0),
-                                probs_open.size(2))).long().to(label.device)
-        label_range = torch.arange(0, probs_open.size(0)).long()
-        label_s_sp[label_range, label] = 1
-        label_sp_neg = 1 - label_s_sp
+        probs_open = logits_open.softmax(1)
+        pos_pt = probs_open.gather(1,label.unsqueeze(1)).squeeze(1)
 
-        pos_pt = (probs_open[:, 1, :]*label_s_sp).sum(1)
-        neg_pt = torch.min(probs_open[:,0,:][label_sp_neg.bool()].view(logits_open.size(0),self.backbone.class_num-1),axis=1)[0]
-        
         pos_focal_losses = -1 * (1-pos_pt)**gamma * torch.log(pos_pt+1e-8)
-        neg_focal_losses = -1 * (1-neg_pt)**gamma * torch.log(neg_pt+1e-8)
         
-        return pos_focal_losses.mean()+neg_focal_losses.mean()
+        return pos_focal_losses.mean()
     
-    @staticmethod    
-    def socr_loss_func(logits_open_u1, logits_open_u2):
-        # Eq.(3) in the paper
-        logits_open_u1 = logits_open_u1.view(logits_open_u1.size(0), 2, -1)
-        logits_open_u2 = logits_open_u2.view(logits_open_u2.size(0), 2, -1)
-        logits_open_u1 = nn.functional.softmax(logits_open_u1, 1)
-        logits_open_u2 = nn.functional.softmax(logits_open_u2, 1)
-        l_socr = torch.mean(torch.sum(torch.sum(torch.abs(
-            logits_open_u1 - logits_open_u2) ** 2, 1), 1))
-        return l_socr
+    @staticmethod
+    def clamp(smoothing_proposed):
+        
+        smoothing_proposed_surgery = dict()
+        for index_, (key_, value_) in enumerate(smoothing_proposed.items()):
+            if value_ is None:
+                smoothing_proposed_surgery[key_] = None
+            else:
+                if index_ != (len(smoothing_proposed)-1):
+                    if key_<=value_<=list(smoothing_proposed.keys())[index_+1]:
+                        smoothing_proposed_surgery[key_] = value_
+                    elif value_<key_:
+                        smoothing_proposed_surgery[key_] = key_
+                    else:
+                        smoothing_proposed_surgery[key_] = list(smoothing_proposed.keys())[index_+1]
+                else:
+                    if key_<=value_<=1:
+                        smoothing_proposed_surgery[key_] = value_
+                    elif value_<key_:
+                        smoothing_proposed_surgery[key_] = key_
+                    else:
+                        smoothing_proposed_surgery[key_] = 1
+                        
+        return smoothing_proposed_surgery
+    
+    @staticmethod
+    def adaptive_smoothing(confidence, acc_distribution):
+        
+        confidence_surgery = confidence.clone()
+        
+        for index_, (key_, value_) in enumerate(acc_distribution.items()):
+            if index_ != (len(acc_distribution)-1):
+                mask_ = ((confidence > key_) & (confidence <= list(acc_distribution.keys())[index_+1]))
+            else:
+                mask_ = ((confidence > key_) & (confidence <= 1))
+
+            if value_ is not None:
+                confidence_surgery[mask_] = value_
+                
+        return confidence_surgery
