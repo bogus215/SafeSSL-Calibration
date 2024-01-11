@@ -182,7 +182,7 @@ class Classification(Task):
                     unlabel_strong_x = data_ulb["x_ulb_s"].to(self.local_rank)
 
                     full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
-                    label_logit, _, _ = full_logits.split(label_y.size(0))
+                    label_logit, u_weak_logit, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     
@@ -201,8 +201,15 @@ class Classification(Task):
                         
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
-                    l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),torch.ones_like(label_y.long()).repeat(2)))
-                    l_ul_cls_loss = self.cross_H_loss_func(self.backbone.mlp(full_features), l_ul_labels, lambda_em) + self.backbone.mlp.l2_norm_loss()
+                    with torch.no_grad():
+                        u_data_similar_idx_to_label = self.backbone.scaling_logits(u_weak_logit).softmax(1).max(1)[0]<tau
+                        select_idx = torch.cat((torch.ones_like(label_y.long()).bool(),u_data_similar_idx_to_label.repeat(2)))
+                        ul_labels = torch.ones_like(label_y.long())
+                        l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),ul_labels.repeat(2)))
+                        
+                    l_ul_cls_loss = self.cross_H_loss_func(self.backbone.mlp(full_features)[select_idx],
+                                                           l_ul_labels[select_idx],
+                                                           lambda_em) + self.backbone.mlp.l2_norm_loss()
 
                     if current_epoch >= start_fix:
 
