@@ -130,6 +130,20 @@ class WRN(nn.Module):
         
         return logits / (torch.abs(temperature)+1e-5)
 
+    def get_only_feat(self, x):
+
+        x = self.init_conv(x)
+        x = self.unit1(x)
+        x = self.unit2(x)
+        x = self.unit3(x)
+        x = self.unit4(x)
+
+        feat = x.squeeze(-1).squeeze(-1)
+
+        if self.normalize:
+            feat = nn.functional.normalize(feat)
+
+        return feat
     
 class Deep_Classifier(nn.Module):
     def __init__(self, in_node, out_node, normalize):

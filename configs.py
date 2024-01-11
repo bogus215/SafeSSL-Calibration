@@ -154,7 +154,7 @@ class ConfigBase(object):
         """Returns an `argparse.ArgumentParser` instance containing logging-related arguments."""
         parser = argparse.ArgumentParser("Logging", add_help=False)
         parser.add_argument('--checkpoint-root', type=str, default='./checkpoints/', help='Top-level directory of checkpoints.')
-        parser.add_argument('--save-every', type=int, default=10000, help='Save model checkpoint every `save_every` epochs.')
+        parser.add_argument('--save-every', type=int, default=5000, help='Save model checkpoint every `save_every` epochs.')
         parser.add_argument('--enable-wandb', action='store_true', help='Use Weights & Biases plugin.')
         parser.add_argument('--wandb-proj-v', type=str, default="")
         parser.add_argument('--enable-plot', action='store_true', help='Plotting unlabeled and testing dataset - TSNE.')
@@ -240,3 +240,23 @@ class OPENMATCHConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "OPENMATCH"
+    
+class RethinkConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(RethinkConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--tau', type=float, default=0.95)
+        parser.add_argument('--tau-two', type=float, default=0.05)
+        parser.add_argument('--alpha-kl', type=float, default=0.3)
+        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "Rethink"
