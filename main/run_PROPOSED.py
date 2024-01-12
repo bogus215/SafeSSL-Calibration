@@ -196,6 +196,7 @@ def main_worker(local_rank: int, config: object):
         open_test_set=open_test_set,
         save_every=config.save_every,
         tau=config.tau,
+        tau_two=config.tau_two,
         cali_coef=config.cali_coef,
         start_fix=config.start_fix,
         n_bins=config.n_bins,

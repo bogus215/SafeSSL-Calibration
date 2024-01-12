@@ -30,6 +30,7 @@ class Classification(Task):
             open_test_set,
             save_every,
             tau,
+            tau_two,
             cali_coef,
             lambda_em,
             bn_stats_fix,
@@ -82,7 +83,7 @@ class Classification(Task):
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
             train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
-                                                         tau=tau,lambda_em=lambda_em,cali_coef=cali_coef,
+                                                         tau=tau,tau_two=tau_two,lambda_em=lambda_em,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
@@ -142,7 +143,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, lambda_em, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, tau_two, lambda_em, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(selected_unlabel_loader)
@@ -202,7 +203,7 @@ class Classification(Task):
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
                     with torch.no_grad():
-                        u_data_similar_idx_to_label = self.backbone.scaling_logits(u_weak_logit).softmax(1).max(1)[0]<tau
+                        u_data_similar_idx_to_label = self.backbone.scaling_logits(u_weak_logit).softmax(1).max(1)[0]<tau_two
                         select_idx = torch.cat((torch.ones_like(label_y.long()).bool(),u_data_similar_idx_to_label.repeat(2)))
                         ul_labels = torch.ones_like(label_y.long())
                         l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),ul_labels.repeat(2)))
