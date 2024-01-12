@@ -63,53 +63,52 @@ class Classification(Task):
         self.trained_iteration = 0
         
         for epoch in range(1, epochs//2 + 1):
-            print(epoch)
-            # train_history = self.pretrain(l_loader,u_loader)
-            # eval_history = self.evaluate(eval_loader, n_bins)
+            train_history = self.pretrain(l_loader,u_loader)
+            eval_history = self.evaluate(eval_loader, n_bins)
 
-        #     epoch_history = collections.defaultdict(dict)
-        #     for k, v1 in train_history.items():
-        #         epoch_history[k]['train'] = v1
-        #         try:
-        #             v2 = eval_history[k]
-        #             epoch_history[k]['eval'] = v2
-        #         except KeyError:
-        #             continue
+            epoch_history = collections.defaultdict(dict)
+            for k, v1 in train_history.items():
+                epoch_history[k]['train'] = v1
+                try:
+                    v2 = eval_history[k]
+                    epoch_history[k]['eval'] = v2
+                except KeyError:
+                    continue
 
-        #     # Write TensorBoard summary
-        #     if self.writer is not None:
-        #         for k, v in epoch_history.items():
-        #             for k_, v_ in v.items():
-        #                 self.writer.add_scalar(f'{k}_{k_}', v_, global_step=epoch)
-        #         if self.scheduler is not None:
-        #             lr = self.scheduler.get_last_lr()[0]
-        #             self.writer.add_scalar('lr', lr, global_step=epoch)
+            # Write TensorBoard summary
+            if self.writer is not None:
+                for k, v in epoch_history.items():
+                    for k_, v_ in v.items():
+                        self.writer.add_scalar(f'{k}_{k_}', v_, global_step=epoch)
+                if self.scheduler is not None:
+                    lr = self.scheduler.get_last_lr()[0]
+                    self.writer.add_scalar('lr', lr, global_step=epoch)
 
-        #     # Save best model checkpoint and Logging
-        #     eval_acc = eval_history['top@1']
-        #     if eval_acc > best_eval_acc:
-        #         best_eval_acc = eval_acc
-        #         best_epoch = epoch
-        #         if self.local_rank == 0:
-        #             ckpt = os.path.join(self.ckpt_dir, "ckpt.best.pth.tar")
-        #             self.save_checkpoint(ckpt, epoch=epoch)
+            # Save best model checkpoint and Logging
+            eval_acc = eval_history['top@1']
+            if eval_acc > best_eval_acc:
+                best_eval_acc = eval_acc
+                best_epoch = epoch
+                if self.local_rank == 0:
+                    ckpt = os.path.join(self.ckpt_dir, "ckpt.best.pth.tar")
+                    self.save_checkpoint(ckpt, epoch=epoch)
 
-        #         test_history = self.evaluate(test_loader, n_bins=n_bins)
-        #         for k, v1 in test_history.items():
-        #             epoch_history[k]['test'] = v1
+                test_history = self.evaluate(test_loader, n_bins=n_bins)
+                for k, v1 in test_history.items():
+                    epoch_history[k]['test'] = v1
 
-        #         if self.writer is not None:
-        #             self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=epoch)
+                if self.writer is not None:
+                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=epoch)
 
-        #     # Write logs
-        #     log = make_epoch_description(
-        #         history=epoch_history,
-        #         current=epoch,
-        #         total=epochs,
-        #         best=best_epoch,
-        #     )
-        #     if logger is not None:
-        #         logger.info(log)
+            # Write logs
+            log = make_epoch_description(
+                history=epoch_history,
+                current=epoch,
+                total=epochs,
+                best=best_epoch,
+            )
+            if logger is not None:
+                logger.info(log)
             
         prototypes = self.backbone.output.state_dict()['linear.weight']
         prototypes = self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],prototypes=prototypes,current_epoch=epoch)
