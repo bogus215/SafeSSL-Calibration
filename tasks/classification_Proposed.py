@@ -35,6 +35,7 @@ class Classification(Task):
             lambda_em,
             bn_stats_fix,
             start_fix: int =5,
+            start_select: int =5,
             n_bins: int = 15,
             train_n_bins: int = 30,
             **kwargs):  # pylint: disable=unused-argument
@@ -76,7 +77,7 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=int(start_fix*4),current_epoch=epoch)
+            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_select,current_epoch=epoch)
 
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)

@@ -232,6 +232,7 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
         parser.add_argument('--bn-stats-fix', action='store_true', help = "")
         parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--start-select', type=int, default=20)
         parser.add_argument('--layer-size', type=int, default=3)
         parser.add_argument('--lambda-weight', type=float, default=1e-5)
         parser.add_argument('--lambda-em', type=float, default=0.1, help='')

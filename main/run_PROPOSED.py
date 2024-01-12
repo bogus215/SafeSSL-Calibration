@@ -199,6 +199,7 @@ def main_worker(local_rank: int, config: object):
         tau_two=config.tau_two,
         cali_coef=config.cali_coef,
         start_fix=config.start_fix,
+        start_select=config.start_select,
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,
