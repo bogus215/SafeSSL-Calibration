@@ -399,7 +399,7 @@ class Classification(Task):
                         unlabel_loss += self.loss_function(u_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
 
                     complementary_confidence, l_in_equ_nine = u_weak_logit.softmax(1).min(1)
-                    negative_loss = torch.tensor(0).to(self.local_rank)
+                    negative_loss = torch.tensor(.0).to(self.local_rank)
 
                     negative_idx = (complementary_confidence<=tau_two) & (~used_unlabeled_index)
                     ulb_negative_idx = (negative_idx) & (self.backbone.memory_queue[ulb_idx].sum(1)<self.backbone.class_num)
