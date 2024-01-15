@@ -323,6 +323,7 @@ class Classification(Task):
 
                 feat = self.backbone.get_only_feat(x)
                 logits = self.backbone.novel_classifier(feat)
+                logits = logits[:,:self.backbone.class_num] # Testing (only in-distribution)
 
                 loss = self.loss_function(logits, y.long())
 
@@ -394,7 +395,7 @@ class Classification(Task):
                     unlabel_confidence, unlabel_pseudo_y = u_weak_logit.softmax(1).max(1)
                     used_unlabeled_index = unlabel_confidence>tau
 
-                    unlabel_loss = alpha_kl* torch.nn.functional.kl_div(input=u_strong_logit.log_softmax(dim=1),target=u_weak_logit,reduction='batchmean')
+                    unlabel_loss = alpha_kl*torch.nn.functional.kl_div(input=u_strong_logit.softmax(dim=1),target=u_weak_logit.softmax(dim=1),reduction='batchmean')
                     if used_unlabeled_index.sum().item() != 0:
                         unlabel_loss += self.loss_function(u_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
 
