@@ -157,8 +157,8 @@ class Classification(Task):
                     ckpt = os.path.join(self.ckpt_dir, "ckpt.best.pth.tar")
                     self.save_checkpoint(ckpt, epoch=epoch)
 
-                test_history = self.evaluate(test_loader, n_bins=n_bins)
-                for k, v1 in test_history[0].items():
+                test_history = self.k_plus_evaluate(test_loader, n_bins=n_bins)
+                for k, v1 in test_history.items():
                     epoch_history[k]['test'] = v1
 
                 if self.writer is not None:
