@@ -204,7 +204,7 @@ class Classification(Task):
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
                     with torch.no_grad():
-                        u_data_similar_idx_to_label = self.backbone.scaling_logits(u_weak_logit).softmax(1).max(1)[0]<tau_two
+                        u_data_similar_idx_to_label = self.backbone.scaling_logits(u_weak_logit).softmax(1).max(1)[0]<=tau_two
                         select_idx = torch.cat((torch.ones_like(label_y.long()).bool(),u_data_similar_idx_to_label.repeat(2)))
                         ul_labels = torch.ones_like(label_y.long())
                         l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),ul_labels.repeat(2)))
