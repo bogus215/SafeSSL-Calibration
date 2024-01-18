@@ -85,7 +85,6 @@ def main_worker(local_rank: int, config: object):
     # Sub-Network Plus
     import torch.nn as nn
     setattr(model,'rot_classifier', nn.Linear(model.output.in_features, 4, bias=False))
-    setattr(model,'novel_classifier', nn.Linear(model.output.in_features, num_classes+1, bias=False))
     initialize_weights(model)
     
     # Data (transforms & datasets)

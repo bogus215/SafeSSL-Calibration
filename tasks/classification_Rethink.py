@@ -110,12 +110,10 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
             
-        prototypes = self.backbone.output.state_dict()['linear.weight']
-        prototypes = self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],prototypes=prototypes,current_epoch=epoch)
+        self.backbone.load_state_dict(torch.load(ckpt)['backbone'])
+        feat_prototypes = self.prototype_update(labeled_dataset=train_set[0])
 
-        pre_weight = self.backbone.novel_classifier.state_dict()
-        pre_weight['weight'] = prototypes
-        self.backbone.novel_classifier.load_state_dict(pre_weight)
+        prototypes = self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],prototypes=feat_prototypes,current_epoch=epoch)
 
         u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
         selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
@@ -124,8 +122,8 @@ class Classification(Task):
         
         for epoch in range(epochs//2 + 1, epochs + 1):
 
-            train_history, cls_wise_results = self.k_plus_train(l_loader,selected_u_loader,tau=tau,tau_two=tau_two,alpha_kl=alpha_kl,n_bins=n_bins)
-            eval_history = self.k_plus_evaluate(eval_loader, n_bins)
+            train_history, cls_wise_results = self.k_plus_train(l_loader,selected_u_loader,prototypes=prototypes,tau=tau,tau_two=tau_two,alpha_kl=alpha_kl,n_bins=n_bins)
+            eval_history = self.k_plus_evaluate(eval_loader, n_bins, prototypes=prototypes)
 
             epoch_history = collections.defaultdict(dict)
             for k, v1 in train_history.items():
@@ -157,7 +155,7 @@ class Classification(Task):
                     ckpt = os.path.join(self.ckpt_dir, "ckpt.best.pth.tar")
                     self.save_checkpoint(ckpt, epoch=epoch)
 
-                test_history = self.k_plus_evaluate(test_loader, n_bins=n_bins)
+                test_history = self.k_plus_evaluate(test_loader, n_bins=n_bins, prototypes=prototypes)
                 for k, v1 in test_history.items():
                     epoch_history[k]['test'] = v1
 
@@ -173,6 +171,35 @@ class Classification(Task):
             )
             if logger is not None:
                 logger.info(log)
+
+    def prototype_update(self, labeled_dataset):
+        
+        loader = DataLoader(dataset=labeled_dataset,
+                            batch_size=128,
+                            drop_last=False,
+                            shuffle=False,
+                            num_workers=4)
+
+        self._set_learning_phase(train=False)
+
+        features, ys = [], []
+        with torch.no_grad():
+            for data in loader:
+
+                x = data['x_lb'].cuda(self.local_rank)
+                y = data['y_lb'].cuda(self.local_rank)
+                features.append(self.backbone.get_only_feat(x))
+                ys.append(y)
+
+        features = torch.cat(features)
+        ys = torch.cat(ys)
+        prototypes = torch.zeros(self.backbone.class_num,features.size(1))
+        for c in range(self.backbone.class_num):
+            prototypes[c]=(features[ys==c].mean(0))
+
+        self._set_learning_phase(train=True)
+
+        return prototypes
 
     def pretrain(self, label_loader, unlabel_loader):
         """Training defined for a single epoch."""
@@ -245,6 +272,8 @@ class Classification(Task):
 
         self._set_learning_phase(train=False)
         
+        prototypes = prototypes.to(self.local_rank)
+        
         with torch.no_grad():
             with Progress(transient=True, auto_refresh=False) as pg:
                 if self.local_rank == 0:
@@ -254,9 +283,9 @@ class Classification(Task):
                     x = data['x_ulb_w'].cuda(self.local_rank)
                     y = data['y_ulb'].cuda(self.local_rank)
 
-                    _, feature = self.get_feature(x)
+                    feature = self.backbone.get_only_feat(x)
                     
-                    d_i = (feature.unsqueeze(1)-prototypes.unsqueeze(0)).square().sum(-1)
+                    d_i = (feature.unsqueeze(1)-prototypes.unsqueeze(0)).square().sum(-1).sqrt()
                     ood_score = d_i.min(-1)[0]
 
                     gt_idx = y < self.backbone.class_num
@@ -298,7 +327,7 @@ class Classification(Task):
         return torch.cat([prototypes,features[~select_all].mean(0,keepdims=True)],axis=0)
             
     @torch.no_grad()
-    def k_plus_evaluate(self, data_loader, n_bins):
+    def k_plus_evaluate(self, data_loader, n_bins, prototypes):
         """Evaluation defined for a single epoch."""
 
         steps = len(data_loader)
@@ -322,7 +351,7 @@ class Classification(Task):
                 idx = batch['idx'].to(self.local_rank)
 
                 feat = self.backbone.get_only_feat(x)
-                logits = self.backbone.novel_classifier(feat)
+                logits = torch.matmul(feat,prototypes.transpose(1,0))
                 logits = logits[:,:self.backbone.class_num] # Testing (only in-distribution)
 
                 loss = self.loss_function(logits, y.long())
@@ -346,7 +375,7 @@ class Classification(Task):
 
         return {k: v.mean().item() for k, v in result.items()}
 
-    def k_plus_train(self, label_loader, selected_unlabel_loader, tau, tau_two, alpha_kl, n_bins):
+    def k_plus_train(self, label_loader, selected_unlabel_loader, prototypes,tau, tau_two, alpha_kl, n_bins):
         """Training defined for a single epoch."""
         
         iteration = len(selected_unlabel_loader)
@@ -387,7 +416,7 @@ class Classification(Task):
                     unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
 
                     features = self.backbone.get_only_feat(torch.cat((label_x, x_ulb_w, x_ulb_s), 0))
-                    full_logits = self.backbone.novel_classifier(features)
+                    full_logits = torch.matmul(features,prototypes.transpose(1,0))
                     
                     label_logit, u_weak_logit, u_strong_logit = full_logits.chunk(3)
                     label_loss = self.loss_function(label_logit, label_y.long())
