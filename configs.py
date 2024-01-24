@@ -273,8 +273,13 @@ class Ablation2Config(ConfigBase):
         parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--tau', type=float, default=0.95)
-        parser.add_argument('--pi', type=float, default=0.05)
+        parser.add_argument('--tau-two', type=float, default=0.5)
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+        parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--start-select', type=int, default=20)
+        parser.add_argument('--layer-size', type=int, default=3)
+        parser.add_argument('--lambda-weight', type=float, default=1e-5)
+        parser.add_argument('--lambda-em', type=float, default=0.1, help='')
 
         return parser
 
