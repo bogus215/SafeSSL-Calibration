@@ -161,3 +161,35 @@ class Deep_Classifier(nn.Module):
             return logits, feature
         else:
             return logits
+        
+# Sub-Network
+class LULClassifier(nn.Module):
+    def __init__(self, feature, size, lambda_weight : float = 1e-5) -> None:
+        super().__init__()
+        
+        assert size>=2
+        
+        self.lambda_weight = lambda_weight
+        
+        modules = []
+        for _ in range(size-1):
+            modules.append(nn.Linear(feature,feature))
+            modules.append(nn.LayerNorm(feature))
+            modules.append(nn.LeakyReLU(0.1))
+        modules.append(nn.Linear(feature,2,bias=False))
+        
+        self.mlp = nn.Sequential(*modules)
+        
+    def forward(self,x):
+        x_ = x.detach()
+        return self.mlp(x_)
+    
+    def l2_norm_loss(self):
+
+        sum_of_squares = 0
+        for param in self.mlp.parameters():
+            sum_of_squares += torch.sum(torch.pow(param, 2))
+
+        weights_reg = self.lambda_weight * sum_of_squares
+
+        return weights_reg

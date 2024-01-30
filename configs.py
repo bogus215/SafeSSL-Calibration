@@ -401,29 +401,33 @@ class MixMatchConfig(ConfigBase):
     def task(self) -> str:
         return "MixMatch"
 
-class TestingSLConfig(ConfigBase):
+class TestingConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
-        super(TestingSLConfig, self).__init__(args, **kwargs)
+        super(TestingConfig, self).__init__(args, **kwargs)
 
     @staticmethod
     def task_specific_parser() -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
         parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--checkpoint-hash', type=str, default= "2023-01-12_03-30-35" , help='')
+        parser.add_argument('--for-what', type=str, default= "Proposed", required=True)
+        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+        parser.add_argument('--layer-size', type=int, default=2)
 
         return parser
 
     @property
     def task(self) -> str:
-        return "SL"
-
+        return "Testing"
+    
     @property
     def checkpoint_dir(self) -> str:
         ckpt = os.path.join(
             self.checkpoint_root,
             self.data,          
-            self.task,          
+            self.task,         
             self.model_name,    
+            self.for_what,
             self.checkpoint_hash
             )
         os.makedirs(ckpt, exist_ok=True)
