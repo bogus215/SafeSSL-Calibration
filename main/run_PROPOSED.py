@@ -5,6 +5,7 @@ import time
 import numpy as np
 import rich
 import torch
+import torch.nn as nn
 
 sys.path.append("./")
 from configs import ProposedConfig
@@ -13,7 +14,7 @@ from datasets.tiny import TinyImageNet ,load_tiny
 from datasets.svhn import SVHN, load_SVHN, Selcted_DATA_Proposed
 from datasets.transforms import SemiAugment, TestAugment
 
-from models import WRN, densenet121, vgg16_bn, inceptionv4
+from models import WRN, densenet121, vgg16_bn, inceptionv4, LULClassifier
 from tasks.classification_Proposed import Classification
 
 from utils.initialization import initialize_weights
@@ -82,39 +83,7 @@ def main_worker(local_rank: int, config: object):
     else:
         logger = None
     
-    # Sub-Network Plus
-    import torch.nn as nn
-    class LULClassifier(nn.Module):
-        def __init__(self, feature, size, lambda_weight : float = 1e-5) -> None:
-            super().__init__()
-            
-            assert size>=2
-            
-            self.lambda_weight = lambda_weight
-            
-            modules = []
-            for _ in range(size-1):
-                modules.append(nn.Linear(feature,feature))
-                modules.append(nn.LayerNorm(feature))
-                modules.append(nn.LeakyReLU(0.1))
-            modules.append(nn.Linear(feature,2,bias=False))
-            
-            self.mlp = nn.Sequential(*modules)
-            
-        def forward(self,x):
-            x_ = x.detach()
-            return self.mlp(x_)
-        
-        def l2_norm_loss(self):
-
-            sum_of_squares = 0
-            for param in self.mlp.parameters():
-                sum_of_squares += torch.sum(torch.pow(param, 2))
-
-            weights_reg = self.lambda_weight * sum_of_squares
-
-            return weights_reg
-            
+    # Sub-Network Plus           
     setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size, lambda_weight=config.lambda_weight))
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
     
