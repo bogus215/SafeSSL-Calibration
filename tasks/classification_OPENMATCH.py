@@ -243,8 +243,8 @@ class Classification(Task):
                         unlabel_confidence, unlabel_pseudo_y = logits_x_ulb_w.softmax(1).max(1)
                         used_unlabeled_index = (unlabel_confidence>p_cutoff)
                         
-                        # in-distribution-wrong-pseudo-label 제외
-                        used_unlabeled_index[(unlabel_y<self.backbone.class_num) & (unlabel_y!=unlabel_pseudo_y)]=False
+                        # K-way classifier : o.o.d 제거
+                        used_unlabeled_index[unlabel_y>=self.backbone.class_num]=False
 
                         fix_loss = self.loss_function(logits_x_ulb_s[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
 
