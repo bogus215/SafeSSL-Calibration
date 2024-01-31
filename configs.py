@@ -432,3 +432,24 @@ class TestingConfig(ConfigBase):
             )
         os.makedirs(ckpt, exist_ok=True)
         return ckpt
+    
+class MTcConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(MTcConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+        parser.add_argument('--tau', type=float, default=0.95)
+        parser.add_argument('--T', type=float, default=0.5)
+        parser.add_argument('--alpha', type=float, default=0.75)
+        parser.add_argument('--lambda_u', type=float, default=75)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "MTC"

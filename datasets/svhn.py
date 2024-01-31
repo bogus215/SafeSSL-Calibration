@@ -273,3 +273,38 @@ class Selcted_DATA_Proposed(Dataset):
             return {'x_ulb_w': weak_img, 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
         else:
             raise ValueError
+        
+        
+class MTC_DATASET(Dataset):
+    def __init__(self,
+                 data_name: str,
+                 dataset: dict,
+                 len_label,
+                 transform: object = None,
+                 **kwargs):
+
+        self.data_name = data_name
+        self.data = dataset['images']
+        self.targets = dataset['labels']
+        self.transform = transform
+
+        # Labeled data : 1 / Unlabeled data : 0 <--> match data : 1 / mismatch data : 0
+        self.len_label = len_label
+        self.soft_labels = np.zeros((len(self.data)))
+        self.soft_labels[:len_label] = 1
+
+    def label_update(self, results):
+
+        self.soft_labels[self.len_label:] = results[self.len_label:].cpu().numpy()
+
+    def __getitem__(self, idx):
+        img, target = self.data[idx], self.targets[idx]
+        soft_labels = self.soft_labels[idx]
+
+        if self.transform is not None:
+            weak_img = self.transform(img)
+
+        return dict(weak_img=weak_img, target=target, soft_label=soft_labels, idx=idx)
+
+    def __len__(self):
+        return len(self.data)
