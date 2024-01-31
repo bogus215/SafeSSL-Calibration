@@ -221,44 +221,32 @@ class Classification(Task):
                     x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
                     unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
 
-                    # ood.filter
-                    x_ulb_w_0 = x_ulb_w_0[data_ulb['y_ulb']<self.backbone.class_num]
-                    x_ulb_w_1 = x_ulb_w_1[data_ulb['y_ulb']<self.backbone.class_num]
-
-                    x_ulb_w = x_ulb_w[unlabel_y<self.backbone.class_num]
-                    x_ulb_s = x_ulb_s[unlabel_y<self.backbone.class_num]
-                    unlabel_y = unlabel_y[unlabel_y<self.backbone.class_num]
-                    
                     num_lb = y_lb.shape[0]
 
                     inputs = torch.cat((x_lb_w_0, x_lb_w_1, x_ulb_w_0, x_ulb_w_1))
                     outputs = self.openmatch_predict(inputs)
                     logits_x_lb = outputs['logits'][:num_lb * 2]
                     logits_open_lb = outputs['logits_open'][:num_lb * 2]
-
-                    if x_ulb_w_0.size(0)!=0:
-                        logits_open_ulb_0, logits_open_ulb_1 = outputs['logits_open'][num_lb * 2:].chunk(2)
-                        em_loss = em_loss_func(logits_open_ulb_0, logits_open_ulb_1)
-                        socr_loss = socr_loss_func(logits_open_ulb_0, logits_open_ulb_1)
-                    else:
-                        em_loss = torch.tensor(0).cuda(self.local_rank)
-                        socr_loss = torch.tensor(0).cuda(self.local_rank)
+                    logits_open_ulb_0, logits_open_ulb_1 = outputs['logits_open'][num_lb * 2:].chunk(2)
 
                     sup_loss = self.loss_function(logits_x_lb, y_lb.repeat(2))
                     ova_loss = ova_loss_func(logits_open_lb, y_lb.repeat(2))
+                    em_loss = em_loss_func(logits_open_ulb_0, logits_open_ulb_1)
+                    socr_loss = socr_loss_func(logits_open_ulb_0, logits_open_ulb_1)
                     
                     fix_loss = torch.tensor(0).cuda(self.local_rank)
                     if current_epoch >= start_fix:
-                        if x_ulb_w.size(0)!=0:
-                            inputs_selected = torch.cat((x_ulb_w, x_ulb_s), 0)
-                            outputs_selected = self.openmatch_predict(inputs_selected)
-                            logits_x_ulb_w, logits_x_ulb_s = outputs_selected['logits'].chunk(2)
+                        inputs_selected = torch.cat((x_ulb_w, x_ulb_s), 0)
+                        outputs_selected = self.openmatch_predict(inputs_selected)
+                        logits_x_ulb_w, logits_x_ulb_s = outputs_selected['logits'].chunk(2)
 
-                            unlabel_confidence, unlabel_pseudo_y = logits_x_ulb_w.softmax(1).max(1)
-                            used_unlabeled_index = (unlabel_confidence>p_cutoff)
+                        unlabel_confidence, unlabel_pseudo_y = logits_x_ulb_w.softmax(1).max(1)
+                        used_unlabeled_index = (unlabel_confidence>p_cutoff)
+                        
+                        # in-distribution-wrong-pseudo-label 제외
+                        used_unlabeled_index[(unlabel_y<self.backbone.class_num) & (unlabel_y!=unlabel_pseudo_y)]=False
 
-                            if used_unlabeled_index.sum().item()!=0:
-                                fix_loss = self.loss_function(logits_x_ulb_s[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
+                        fix_loss = self.loss_function(logits_x_ulb_s[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
 
                     loss = sup_loss + ova_loss + lambda_em * em_loss + lambda_socr * socr_loss + fix_loss
 
