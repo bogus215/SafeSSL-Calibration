@@ -319,13 +319,13 @@ class Classification(Task):
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb_selected['x_ulb_w'].to(self.local_rank)
-                    unlabel_strong_x = data_ulb_selected['x_ulb_s'].to(self.local_rank)
+                    unlabel_weak_x_1 = data_ulb_selected['x_ulb_w_1'].to(self.local_rank)
 
                     d_label_x = data_domain['weak_img'].to(self.local_rank)
                     d_soft_label = data_domain['soft_label'].to(self.local_rank)
                     d_indexs = data_domain['idx'].to(self.local_rank)
 
-                    logits, features = self.get_feature(torch.cat((label_x,d_label_x,unlabel_weak_x,unlabel_strong_x)))
+                    logits, features = self.get_feature(torch.cat((label_x,d_label_x,unlabel_weak_x,unlabel_weak_x_1)))
                     domain_logit = self.backbone.domain_classifier(features[:2*label_x.size(0)])
 
                     L_d = nn.functional.binary_cross_entropy_with_logits(domain_logit.squeeze(), torch.cat((torch.ones_like(d_soft_label),d_soft_label)))
@@ -340,7 +340,7 @@ class Classification(Task):
                         targets_u = pt / pt.sum(dim=1, keepdim=True)
                         targets_u = targets_u.detach()
 
-                    all_inputs = torch.cat([label_x, unlabel_weak_x, unlabel_strong_x], dim=0)
+                    all_inputs = torch.cat([label_x, unlabel_weak_x, unlabel_weak_x_1], dim=0)
                     all_targets = torch.cat([one_hot_label_y, targets_u, targets_u], dim=0)   
                             
                     l = np.random.beta(alpha, alpha)
