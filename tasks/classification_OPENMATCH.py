@@ -143,19 +143,23 @@ class Classification(Task):
 
                     outputs = self.openmatch_predict(x)
                     logits, logits_open = outputs['logits'], outputs['logits_open']
-                    logits = nn.functional.softmax(logits, 1)
+                    probs = nn.functional.softmax(logits, 1)
                     logits_open = nn.functional.softmax(logits_open.view(logits_open.size(0), 2, -1), 1)
                     tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
-                    pred_close = logits.data.max(1)[1]
+                    pred_close = probs.data.max(1)[1]
                     unk_score = logits_open[tmp_range, 0, pred_close]
                     select_idx = unk_score < 0.5
                     gt_idx = y < self.backbone.class_num
                     if batch_idx == 0:
                         select_all = select_idx
                         gt_all = gt_idx
+                        probs_all = probs
+                        labels_all = y
                     else:
                         select_all = torch.cat([select_all, select_idx], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
+                        probs_all = torch.cat([probs_all, probs], 0)
+                        labels_all = torch.cat([labels_all, y], 0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
@@ -174,6 +178,12 @@ class Classification(Task):
             self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
             self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
             self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
+
+            if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
+            if ((gt_all) & (select_all)).sum()>0:
+                self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
 
         self._set_learning_phase(train=True)
         if current_epoch >= start_fix:
