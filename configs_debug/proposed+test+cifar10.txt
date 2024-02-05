@@ -1,0 +1,12 @@
+--gpus=0
+--data=cifar10
+--server=main
+--normalize
+--n-label-per-class=400
+--n-valid-per-class=500
+--mismatch-ratio=0.30
+--for-what=Proposed
+--checkpoint-hash=2024-01-16_01-35-38
+--normalize
+--layer-size=2
+--seed=2

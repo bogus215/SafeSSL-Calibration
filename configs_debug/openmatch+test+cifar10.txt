@@ -1,0 +1,9 @@
+--gpus=0
+--data=cifar10
+--server=main
+--n-label-per-class=400
+--n-valid-per-class=500
+--mismatch-ratio=0.3
+--for-what=OPENMATCH
+--checkpoint-hash=2024-01-28_18-37-56
+--seed=2
