@@ -690,9 +690,12 @@ class Classification(Task):
             if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
                 self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
                 self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d over conf 0.95', ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum() / gt_all.sum() , global_step=current_epoch)
+
             if ((gt_all) & (select_all)).sum()>0:
                 self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
                 self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d under ood score 0.5', ((gt_all) & (select_all)).sum() / gt_all.sum() , global_step=current_epoch)
 
         self._set_learning_phase(train=True)
         if current_epoch >= start_fix:
