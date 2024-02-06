@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 from tasks.classification import Classification as Task
 from utils import RandomSampler, TopKAccuracy
@@ -66,6 +67,9 @@ class Classification(Task):
         self.trained_iteration = 0
 
         for epoch in range(1, epochs + 1):
+
+            # training unlabeled data logging
+            self.log_unlabeled_data(unlabel_loader=unlabel_loader,current_epoch=epoch)
 
             # Train & evaluate
             train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, tau=tau, consis_coef=consis_coef, n_bins=n_bins)
@@ -213,3 +217,56 @@ class Classification(Task):
                     self.scheduler.step()
 
         return {k: v.mean().item() for k, v in result.items()}, cls_wise_results, label_iterator, unlabel_iterator
+    
+    def log_unlabeled_data(self,unlabel_loader,current_epoch):
+
+        self._set_learning_phase(train=False)
+        
+        with torch.no_grad():
+            with Progress(transient=True, auto_refresh=False) as pg:
+                if self.local_rank == 0:
+                    task = pg.add_task(f"[bold red] Extracting...", total=len(unlabel_loader))
+                for batch_idx, data in enumerate(unlabel_loader):
+
+                    x = data['weak_img'].cuda(self.local_rank)
+                    y = data['y'].cuda(self.local_rank)
+
+                    logits = self.predict(x)
+                    probs = nn.functional.softmax(logits, 1)
+                    select_idx = logits.softmax(1).max(1)[0] > 0.95
+                    gt_idx = y < self.backbone.class_num
+
+                    if batch_idx == 0:
+                        select_all = select_idx
+                        gt_all = gt_idx
+                        probs_all, logits_all = probs, logits
+                        labels_all = y
+                    else:
+                        select_all = torch.cat([select_all, select_idx], 0)
+                        gt_all = torch.cat([gt_all, gt_idx], 0)
+                        probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
+                        labels_all = torch.cat([labels_all, y], 0)
+                        
+                    if self.local_rank == 0:
+                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(unlabel_loader)}] "
+                        pg.update(task, advance=1., description=desc)
+                        pg.refresh()
+
+        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
+        select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+
+        selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
+
+        # Write TensorBoard summary
+        if self.writer is not None:
+            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
+            self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
+            self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
+            self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+
+            if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
