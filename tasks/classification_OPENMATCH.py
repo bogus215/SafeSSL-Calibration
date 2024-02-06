@@ -153,12 +153,12 @@ class Classification(Task):
                     if batch_idx == 0:
                         select_all = select_idx
                         gt_all = gt_idx
-                        probs_all = probs
+                        probs_all, logits_all = probs, logits
                         labels_all = y
                     else:
                         select_all = torch.cat([select_all, select_idx], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
-                        probs_all = torch.cat([probs_all, probs], 0)
+                        probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
                         labels_all = torch.cat([labels_all, y], 0)
                         
                     if self.local_rank == 0:
@@ -179,11 +179,14 @@ class Classification(Task):
             self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
             self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
             self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
 
             if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
                 self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
             if ((gt_all) & (select_all)).sum()>0:
                 self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
 
         self._set_learning_phase(train=True)
         if current_epoch >= start_fix:
@@ -252,9 +255,6 @@ class Classification(Task):
 
                         unlabel_confidence, unlabel_pseudo_y = logits_x_ulb_w.softmax(1).max(1)
                         used_unlabeled_index = (unlabel_confidence>p_cutoff)
-                        
-                        # K-way classifier : o.o.d 제거
-                        used_unlabeled_index[unlabel_y>=self.backbone.class_num]=False
 
                         fix_loss = self.loss_function(logits_x_ulb_s[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
 
