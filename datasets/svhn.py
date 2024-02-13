@@ -184,6 +184,8 @@ class Selcted_DATA(Dataset):
         self.transform = transform
         self.name = name
         
+        self.idx_data = np.arange(len(self.data))
+        
         self.data_index = None
         self.targets_index = None
         self.set_index()
@@ -205,19 +207,20 @@ class Selcted_DATA(Dataset):
         else:
             target = self.targets_index[idx]
         img = self.data_index[idx]
+        data_idx = self.idx_data[idx]
 
-        return img, target
+        return img, target, data_idx
 
     def __getitem__(self, idx):
         
-        img, target = self.__sample__(idx)
+        img, target, data_idx = self.__sample__(idx)
         if self.transform is not None:
             weak_img = self.transform(img)
 
         if self.name == 'train_lb':
-            return {'idx_lb': idx, 'x_lb': weak_img, 'x_lb_w_0': weak_img, 'x_lb_w_1': self.transform(img),'y_lb': target}
+            return {'idx_lb': data_idx, 'x_lb': weak_img, 'x_lb_w_0': weak_img, 'x_lb_w_1': self.transform(img),'y_lb': target}
         elif self.name == 'train_ulb':
-            return {'idx_ulb': idx, 'x_ulb_w_0': weak_img, 'x_ulb_w_1': self.transform(img), 'y_ulb': target}
+            return {'idx_ulb': data_idx, 'x_ulb_w_0': weak_img, 'x_ulb_w_1': self.transform(img), 'y_ulb': target}
         elif self.name == 'train_ulb_selected':
             return {'x_ulb_w': weak_img, 'x_ulb_w_1': self.transform(img), 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
         else:
