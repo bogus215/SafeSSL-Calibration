@@ -58,8 +58,7 @@ class Classification(Task):
         best_epoch    = 0
 
         # pre-train
-        # for epoch in range(1, epochs//2 + 1):
-        for epoch in range(1, 5):
+        for epoch in range(1, epochs//2 + 1):
             
             train_history = self.pretrain(l_loader, u_loader, sim_lambda, temperature) 
             eval_history = self.evaluate(eval_loader, n_bins)
