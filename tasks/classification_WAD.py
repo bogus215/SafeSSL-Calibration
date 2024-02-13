@@ -124,7 +124,7 @@ class Classification(Task):
         selected_u_loader = DataLoader(train_set[1],batch_size=self.batch_size//2, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
         
         pseudo_index, u_pseudo_label_logits, u_weights = self.knowledge_generation(train_set[0], train_set[1])
-
+        
         for epoch in range(epochs//2 + 1, epochs + 1):
             train_history = self.train(selected_l_loader, selected_u_loader, pseudo_index=pseudo_index, u_pseudo_label_logits=u_pseudo_label_logits, u_weights=u_weights, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
@@ -205,7 +205,7 @@ class Classification(Task):
                 selected_l_loader = DataLoader(selected_labeled_set, batch_size=self.batch_size//2, sampler=l_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
                 selected_u_loader = DataLoader(selected_unlabeled_set, batch_size=self.batch_size//2, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
 
-                pseudo_index, u_pseudo_label_logits, u_weights = self.knowledge_generation(train_set[0], train_set[1])
+                pseudo_index, u_pseudo_label_logits, u_weights = self.knowledge_generation(selected_labeled_set, selected_unlabeled_set)
 
 
     def pretrain(self, label_loader, unlabel_loader, sim_lambda, temperature):
