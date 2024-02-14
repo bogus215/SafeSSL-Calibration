@@ -697,6 +697,27 @@ class Classification(Task):
                 self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
                 self.writer.add_scalar('Selected ratio of i.d under ood score 0.5', ((gt_all) & (select_all)).sum() / gt_all.sum() , global_step=current_epoch)
 
+            if (probs_all.max(1)[0]>=0.95).sum()>0:
+                self.writer.add_scalar('Seen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum(), global_step=current_epoch)
+                
+            if select_all.sum()>0:
+                self.writer.add_scalar('Seen-class ratio under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum(), global_step=current_epoch)
+
+            if ((select_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('Seen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
+
         self._set_learning_phase(train=True)
         if current_epoch >= start_fix:
             if len(selected_idx) > 0:
