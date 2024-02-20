@@ -192,11 +192,15 @@ class LULClassifier(nn.Module):
             modules.append(nn.LeakyReLU(0.1))
         modules.append(nn.Linear(feature,2,bias=False))
         
+        self.reversal = GradientReversalLayer()
         self.mlp = nn.Sequential(*modules)
         
-    def forward(self,x):
-        x_ = x.detach()
-        return self.mlp(x_)
+    def forward(self,x,reversal=False):
+
+        if reversal:
+            x = self.reversal(x)
+
+        return self.mlp(x)
     
     def l2_norm_loss(self):
 

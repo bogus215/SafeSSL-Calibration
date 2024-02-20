@@ -12,8 +12,12 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score
 from tasks.classification import Classification as Task
 from tasks.classification_OPENMATCH import DistributedSampler
 from utils import TopKAccuracy
-
+from utils.optimization import get_optimizer, get_multi_step_scheduler
 from utils.logging import make_epoch_description
+from skimage.filters import threshold_otsu
+
+from torch.utils.tensorboard import SummaryWriter
+
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 plt.style.use('bmh')
@@ -23,6 +27,73 @@ class Classification(Task):
     def __init__(self, backbone: nn.Module):
         super(Classification, self).__init__(backbone)
 
+    def prepare(self,
+                ckpt_dir: str,
+                optimizer: str,
+                learning_rate: float,
+                iterations: int,
+                batch_size: int,
+                num_workers: int,
+                lulclassifier: nn.Module,
+                local_rank: int,
+                mixed_precision: bool,
+                gamma: float,
+                milestones: list,
+                weight_decay: float,
+                **kwargs):  # pylint: disable=unused-argument
+        """Add function docstring."""
+
+        # Set attributes
+        self.ckpt_dir = ckpt_dir                # pylint: disable=attribute-defined-outside-init
+        self.iterations = iterations            # pylint: disable=attribute-defined-outside-init
+        self.batch_size = batch_size            # pylint: disable=attribute-defined-outside-init
+        self.milestones = milestones            # pylint: disable=attribute-defined-outside-init
+        self.gamma = gamma                      # pylint: disable=attribute-defined-outside-init
+        self.num_workers = num_workers          # pylint: disable=attribute-defined-outside-init
+        self.local_rank = local_rank            # pylint: disable=attribute-defined-outside-init
+        self.mixed_precision = mixed_precision  # pylint: disable=attribute-defined-outside-init
+        self.lulclassifier = lulclassifier
+
+        self.backbone.to(local_rank)
+        self.lulclassifier.to(local_rank)
+
+        # Mixed precision training (optional)
+        self.scaler = torch.cuda.amp.GradScaler() if mixed_precision else None
+        self.scaler_d = torch.cuda.amp.GradScaler() if mixed_precision else None
+
+        # Optimization (TODO: freeze)
+        self.optimizer = get_optimizer(
+            params=[
+                {'params': self.backbone.parameters()},
+            ],
+            name=optimizer,
+            lr=learning_rate,
+            weight_decay=weight_decay
+        )
+
+        self.optimizer_d = get_optimizer(
+            params=[
+                {'params': self.lulclassifier.parameters()},
+            ],
+            name=optimizer,
+            lr=learning_rate,
+        )
+        
+        self.scheduler = get_multi_step_scheduler(
+            optimizer = self.optimizer,
+            milestones = self.milestones,
+            gamma= self.gamma
+            )
+
+        # Loss function
+        self.loss_function = nn.CrossEntropyLoss()
+
+        # TensorBoard
+        self.writer = SummaryWriter(ckpt_dir) if local_rank == 0 else None
+
+        # Ready to train!
+        self.prepared = True
+
     def run(self,
             train_set,
             eval_set,
@@ -30,7 +101,7 @@ class Classification(Task):
             open_test_set,
             save_every,
             tau,
-            tau_two,
+            lambda_align,
             cali_coef,
             lambda_em,
             bn_stats_fix,
@@ -84,7 +155,7 @@ class Classification(Task):
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
             train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
-                                                         tau=tau,tau_two=tau_two,lambda_em=lambda_em,cali_coef=cali_coef,
+                                                         tau=tau,lambda_align=lambda_align,lambda_em=lambda_em,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
@@ -144,7 +215,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, tau_two, lambda_em, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, lambda_align, lambda_em, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(selected_unlabel_loader)
@@ -184,7 +255,7 @@ class Classification(Task):
                     unlabel_strong_x = data_ulb["x_ulb_s"].to(self.local_rank)
 
                     full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
-                    label_logit, u_weak_logit, _ = full_logits.split(label_y.size(0))
+                    label_logit, _, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     
@@ -203,15 +274,14 @@ class Classification(Task):
                         
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
-                    with torch.no_grad():
-                        u_data_similar_idx_to_label = self.backbone.scaling_logits(u_weak_logit).softmax(1).max(1)[0]<=tau_two
-                        select_idx = torch.cat((torch.ones_like(label_y.long()).bool(),u_data_similar_idx_to_label.repeat(2)))
-                        ul_labels = torch.ones_like(label_y.long())
-                        l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),ul_labels.repeat(2)))
+                    ul_labels = torch.ones_like(label_y.long())
+                    l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),ul_labels.repeat(2)))
                         
-                    l_ul_cls_loss = self.cross_H_loss_func(self.backbone.mlp(full_features)[select_idx],
-                                                           l_ul_labels[select_idx],
-                                                           lambda_em) + self.backbone.mlp.l2_norm_loss()
+                    domain_logits = self.lulclassifier(full_features.detach())
+                    l_ul_cls_loss = self.cross_H_loss_func(domain_logits,
+                                                           l_ul_labels,
+                                                           lambda_em,
+                                                           torch.ones_like(l_ul_labels)) + self.lulclassifier.l2_norm_loss()
 
                     if current_epoch >= start_fix:
 
@@ -239,17 +309,31 @@ class Classification(Task):
                         if used_unlabeled_index.sum().item() != 0:
                             unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                 
-                    loss = label_loss + unlabel_loss + l_ul_cls_loss
+                    reversal_domain_logits = self.backbone.mlp(full_features,reversal=True)
+                    weights = torch.cat((torch.ones_like(label_y),domain_logits.softmax(1)[len(label_y):-len(label_y),0].detach().repeat(2)))
+                    align_loss = self.cross_H_loss_func(reversal_domain_logits,l_ul_labels,0,weights)
+                    
+                    loss = label_loss + unlabel_loss + lambda_align*align_loss
                   
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
+
+                    self.scaler_d.scale(l_ul_cls_loss).backward()
+                    self.scaler_d.step(self.optimizer_d)
+                    self.scaler_d.update()
+
                 else:
                     loss.backward()
                     self.optimizer.step()
 
+                    l_ul_cls_loss.backward()
+                    self.optimizer_d.step()
+
                 self.optimizer.zero_grad()
+                self.optimizer_d.zero_grad()
+
                 self.trained_iteration+=1
                 
                 result['loss'][i] = loss.detach()
@@ -653,24 +737,37 @@ class Classification(Task):
                     logits, features = self.get_feature(x)
                     logits = self.backbone.scaling_logits(logits)
                     probs = nn.functional.softmax(logits, 1)
-                    select_idx = self.backbone.mlp(features).softmax(1)[:,0] > 0.5
+
+                    inlier_score = self.lulclassifier(features).softmax(1)[:,0]
+                    inlier_score_mlp = self.backbone.mlp(features).softmax(1)[:,0]
+
                     gt_idx = y < self.backbone.class_num
 
                     if batch_idx == 0:
-                        select_all = select_idx
                         gt_all = gt_idx
                         probs_all, logits_all = probs, logits
                         labels_all = y
+                        inlier_score_all = inlier_score
+                        inlier_score_mlp_all = inlier_score_mlp
                     else:
-                        select_all = torch.cat([select_all, select_idx], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
                         probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
                         labels_all = torch.cat([labels_all, y], 0)
+                        inlier_score_all = torch.cat([inlier_score_all, inlier_score], 0)
+                        inlier_score_mlp_all = torch.cat([inlier_score_mlp_all, inlier_score_mlp], 0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
+
+        Otsu = threshold_otsu(inlier_score_all.cpu().numpy())
+        select_all = inlier_score_all > Otsu
+
+        Otsu_mlp = threshold_otsu(inlier_score_mlp_all.cpu().numpy())
+        select_all_mlp = inlier_score_mlp_all > Otsu_mlp
+        
+        select_accuracy_mlp = accuracy_score(gt_all.cpu().numpy(), select_all_mlp.cpu().numpy()) 
 
         select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
@@ -682,10 +779,12 @@ class Classification(Task):
         if self.writer is not None:
             self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
             self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
+            self.writer.add_scalar('Selected accuracy mlp', select_accuracy_mlp, global_step=current_epoch)
             self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
             self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
             self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
             self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+            self.writer.add_scalar('Otsu',Otsu,global_step=current_epoch)
 
             if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
                 self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
@@ -723,12 +822,12 @@ class Classification(Task):
             if len(selected_idx) > 0:
                 selected_dataset.set_index(selected_idx)
                 
-    def cross_H_loss_func(self, logits_open, label, lambda_em):
+    def cross_H_loss_func(self, logits_open, label, lambda_em, weights):
 
         probs_open = logits_open.softmax(1)
 
         pos_pt = probs_open.gather(1,label.unsqueeze(1)).squeeze(1)
-        pos_losses = -torch.log(pos_pt+1e-8)
+        pos_losses = -torch.log(pos_pt+1e-8) * weights
         
         entropy_losses = torch.sum(-probs_open * torch.log(probs_open + 1e-8),1)
         
@@ -774,3 +873,13 @@ class Classification(Task):
                 confidence_surgery[mask_] = value_
                 
         return confidence_surgery
+    
+    def save_checkpoint(self, path: str, **kwargs):
+        ckpt = {
+            'backbone': self.backbone.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'd_classifier': self.lulclassifier.state_dict()
+        }
+        if kwargs:
+            ckpt.update(kwargs)
+        torch.save(ckpt, path)
