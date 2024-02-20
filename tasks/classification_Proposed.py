@@ -252,10 +252,9 @@ class Classification(Task):
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
-                    unlabel_strong_x = data_ulb["x_ulb_s"].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
-                    label_logit, _, _ = full_logits.split(label_y.size(0))
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x],axis=0))
+                    label_logit, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     
@@ -275,13 +274,12 @@ class Classification(Task):
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
                     ul_labels = torch.ones_like(label_y.long())
-                    l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),ul_labels.repeat(2)))
+                    l_ul_labels = torch.nn.functional.one_hot(torch.cat((torch.zeros_like(label_y.long()),ul_labels)),2)
                         
                     domain_logits = self.lulclassifier(full_features.detach())
                     l_ul_cls_loss = self.cross_H_loss_func(domain_logits,
                                                            l_ul_labels,
-                                                           lambda_em,
-                                                           torch.ones_like(l_ul_labels)) + self.lulclassifier.l2_norm_loss()
+                                                           lambda_em) + self.lulclassifier.l2_norm_loss()
 
                     if current_epoch >= start_fix:
 
@@ -309,9 +307,9 @@ class Classification(Task):
                         if used_unlabeled_index.sum().item() != 0:
                             unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                 
-                    reversal_domain_logits = self.backbone.mlp(full_features,reversal=True)
-                    weights = torch.cat((torch.ones_like(label_y),domain_logits.softmax(1)[len(label_y):-len(label_y),0].detach().repeat(2)))
-                    align_loss = self.cross_H_loss_func(reversal_domain_logits,l_ul_labels,0,weights)
+                    reversal_domain_logits = self.backbone.mlp(full_features)
+                    l_ul_labels[len(label_x):] = domain_logits.detach().softmax(1)[len(label_x):]
+                    align_loss = self.cross_H_loss_func(reversal_domain_logits,l_ul_labels,0)
                     
                     loss = label_loss + unlabel_loss + lambda_align*align_loss
                   
@@ -822,14 +820,12 @@ class Classification(Task):
             if len(selected_idx) > 0:
                 selected_dataset.set_index(selected_idx)
                 
-    def cross_H_loss_func(self, logits_open, label, lambda_em, weights):
+    def cross_H_loss_func(self, logits_open, one_hot_label, lambda_em):
 
         probs_open = logits_open.softmax(1)
 
-        pos_pt = probs_open.gather(1,label.unsqueeze(1)).squeeze(1)
-        pos_losses = -torch.log(pos_pt+1e-8) * weights
-        
-        entropy_losses = torch.sum(-probs_open * torch.log(probs_open + 1e-8),1)
+        pos_losses = (-one_hot_label*torch.log(probs_open+1e-7)).sum(1)
+        entropy_losses = torch.sum(-probs_open*torch.log(probs_open + 1e-7),1)
         
         return pos_losses.mean() + lambda_em*entropy_losses.mean()
     
