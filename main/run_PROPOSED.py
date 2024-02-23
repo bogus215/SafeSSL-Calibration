@@ -84,12 +84,10 @@ def main_worker(local_rank: int, config: object):
         logger = None
     
     # Sub-Network Plus           
-    lulclassifier = LULClassifier(model.output.in_features, size=config.layer_size,lambda_weight=config.lambda_weight)
-    initialize_weights(lulclassifier)
-
-    setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size,lambda_weight=config.lambda_weight))
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
-    initialize_weights(model)
+    lulclassifier = LULClassifier(model.output.in_features, size=config.layer_size,lambda_weight=config.lambda_weight)
+
+    initialize_weights(lulclassifier)
     
     # Data (transforms & datasets)
     trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
@@ -168,7 +166,7 @@ def main_worker(local_rank: int, config: object):
         open_test_set=open_test_set,
         save_every=config.save_every,
         tau=config.tau,
-        lambda_align=config.lambda_align,
+        tau_two=config.tau_two,
         cali_coef=config.cali_coef,
         start_fix=config.start_fix,
         start_select=config.start_select,

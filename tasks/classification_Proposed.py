@@ -101,7 +101,7 @@ class Classification(Task):
             open_test_set,
             save_every,
             tau,
-            lambda_align,
+            tau_two,
             cali_coef,
             lambda_em,
             bn_stats_fix,
@@ -155,7 +155,7 @@ class Classification(Task):
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
             train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
-                                                         tau=tau,lambda_align=lambda_align,lambda_em=lambda_em,cali_coef=cali_coef,
+                                                         tau=tau,tau_two=tau_two,lambda_em=lambda_em,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
@@ -191,6 +191,11 @@ class Classification(Task):
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
+
+            if logger is not None and eval_acc==1:
+                logger.info("Eval acc == 1 --> Stop training")
+                break
+
             if eval_acc > best_eval_acc:
                 best_eval_acc = eval_acc
                 best_epoch = epoch
@@ -215,7 +220,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, lambda_align, lambda_em, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, tau_two, lambda_em, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(selected_unlabel_loader)
@@ -252,9 +257,10 @@ class Classification(Task):
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
+                    unlabel_strong_x = data_ulb['x_ulb_s'].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x],axis=0))
-                    label_logit, _ = full_logits.split(label_y.size(0))
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
+                    label_logit, _, _ = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     
@@ -273,12 +279,16 @@ class Classification(Task):
                         
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
-                    ul_labels = torch.ones_like(label_y.long())
-                    l_ul_labels = torch.nn.functional.one_hot(torch.cat((torch.zeros_like(label_y.long()),ul_labels)),2)
-                        
                     domain_logits = self.lulclassifier(full_features.detach())
-                    l_ul_cls_loss = self.cross_H_loss_func(domain_logits,
-                                                           l_ul_labels,
+
+                    with torch.no_grad():
+                        ul_labels = torch.cat((torch.ones_like(label_y.long()),domain_logits[len(label_y):-len(label_y)].argmax(1)))
+                        l_ul_labels = torch.nn.functional.one_hot(torch.cat((torch.zeros_like(label_y.long()),ul_labels)),2)
+                        safe_idx = (domain_logits[len(label_y):-len(label_y)].softmax(1).max(1)[0]>tau_two)
+                        safe_idx = torch.cat((torch.ones_like(label_y).repeat(2).bool(), safe_idx))
+                    
+                    l_ul_cls_loss = self.cross_H_loss_func(domain_logits[safe_idx],
+                                                           l_ul_labels[safe_idx],
                                                            lambda_em) + self.lulclassifier.l2_norm_loss()
 
                     if current_epoch >= start_fix:
@@ -307,11 +317,7 @@ class Classification(Task):
                         if used_unlabeled_index.sum().item() != 0:
                             unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                 
-                    reversal_domain_logits = self.backbone.mlp(full_features)
-                    l_ul_labels[len(label_x):] = domain_logits.detach().softmax(1)[len(label_x):]
-                    align_loss = self.cross_H_loss_func(reversal_domain_logits,l_ul_labels,0)
-                    
-                    loss = label_loss + unlabel_loss + lambda_align*align_loss
+                    loss = label_loss + unlabel_loss
                   
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward()
@@ -737,7 +743,6 @@ class Classification(Task):
                     probs = nn.functional.softmax(logits, 1)
 
                     inlier_score = self.lulclassifier(features).softmax(1)[:,0]
-                    inlier_score_mlp = self.backbone.mlp(features).softmax(1)[:,0]
 
                     gt_idx = y < self.backbone.class_num
 
@@ -746,13 +751,11 @@ class Classification(Task):
                         probs_all, logits_all = probs, logits
                         labels_all = y
                         inlier_score_all = inlier_score
-                        inlier_score_mlp_all = inlier_score_mlp
                     else:
                         gt_all = torch.cat([gt_all, gt_idx], 0)
                         probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
                         labels_all = torch.cat([labels_all, y], 0)
                         inlier_score_all = torch.cat([inlier_score_all, inlier_score], 0)
-                        inlier_score_mlp_all = torch.cat([inlier_score_mlp_all, inlier_score_mlp], 0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
@@ -762,11 +765,6 @@ class Classification(Task):
         Otsu = threshold_otsu(inlier_score_all.cpu().numpy())
         select_all = inlier_score_all > Otsu
 
-        Otsu_mlp = threshold_otsu(inlier_score_mlp_all.cpu().numpy())
-        select_all_mlp = inlier_score_mlp_all > Otsu_mlp
-        
-        select_accuracy_mlp = accuracy_score(gt_all.cpu().numpy(), select_all_mlp.cpu().numpy()) 
-
         select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
         select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
@@ -775,11 +773,10 @@ class Classification(Task):
 
         # Write TensorBoard summary
         if self.writer is not None:
-            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
             self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
-            self.writer.add_scalar('Selected accuracy mlp', select_accuracy_mlp, global_step=current_epoch)
             self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
             self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
             self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
             self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
             self.writer.add_scalar('Otsu',Otsu,global_step=current_epoch)
