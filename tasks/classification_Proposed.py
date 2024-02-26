@@ -288,9 +288,7 @@ class Classification(Task):
                     l_ul_cls_loss = self.cross_H_loss_func(domain_logits, l_ul_labels, torch.cat((label_y,unlabel_logit.argmax(1)))) + self.lulclassifier.l2_norm_loss()
 
                     with torch.no_grad():
-                        target_open_probs = self.backbone.scaling_logits(unlabel_logit).softmax(1).unsqueeze(1)
-                        target_open_probs = (target_open_probs * ((domain_logits[len(label_y):].view(len(label_y),2,-1)).softmax(1))).sum(-1)
-
+                        target_open_probs = ((domain_logits[len(label_y):].view(len(label_y),2,-1)).softmax(1)).mean(-1)
                         safe_open_idxs = target_open_probs.max(1)[0]>tau_two
 
                     if safe_open_idxs.sum().item()!=0:
