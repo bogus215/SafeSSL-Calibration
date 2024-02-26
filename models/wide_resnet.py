@@ -190,7 +190,7 @@ class LULClassifier(nn.Module):
             modules.append(nn.Linear(feature,feature))
             modules.append(nn.LayerNorm(feature))
             modules.append(nn.LeakyReLU(0.1))
-        modules.append(nn.Linear(feature,2*class_num, bias=False))
+        modules.append(nn.Linear(feature,class_num, bias=False))
         
         self.reversal = GradientReversalLayer()
         self.mlp = nn.Sequential(*modules)
