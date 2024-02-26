@@ -101,9 +101,7 @@ class Classification(Task):
             open_test_set,
             save_every,
             tau,
-            tau_two,
             cali_coef,
-            lambda_em,
             bn_stats_fix,
             start_fix: int =5,
             start_select: int =5,
@@ -155,7 +153,7 @@ class Classification(Task):
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
             train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
-                                                         tau=tau,tau_two=tau_two,lambda_em=lambda_em,cali_coef=cali_coef,
+                                                         tau=tau,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
@@ -220,7 +218,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, tau_two, lambda_em, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(selected_unlabel_loader)
@@ -257,10 +255,9 @@ class Classification(Task):
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
-                    unlabel_strong_x = data_ulb['x_ulb_s'].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
-                    label_logit, _, _ = full_logits.split(label_y.size(0))
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x],axis=0))
+                    label_logit, unlabel_logit = full_logits.split(label_y.size(0))
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     
@@ -281,15 +278,8 @@ class Classification(Task):
                     
                     domain_logits = self.lulclassifier(full_features.detach())
 
-                    with torch.no_grad():
-                        ul_labels = torch.cat((torch.ones_like(label_y.long()),domain_logits[len(label_y):-len(label_y)].argmax(1)))
-                        l_ul_labels = torch.nn.functional.one_hot(torch.cat((torch.zeros_like(label_y.long()),ul_labels)),2)
-                        safe_idx = (domain_logits[len(label_y):-len(label_y)].softmax(1).max(1)[0]>tau_two)
-                        safe_idx = torch.cat((torch.ones_like(label_y).repeat(2).bool(), safe_idx))
-                    
-                    l_ul_cls_loss = self.cross_H_loss_func(domain_logits[safe_idx],
-                                                           l_ul_labels[safe_idx],
-                                                           lambda_em) + self.lulclassifier.l2_norm_loss()
+                    l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),torch.ones_like(label_y.long())))
+                    l_ul_cls_loss = self.cross_H_loss_func(domain_logits, l_ul_labels, torch.cat((label_y,unlabel_logit.argmax(1)))) + self.lulclassifier.l2_norm_loss()
 
                     if current_epoch >= start_fix:
 
@@ -742,7 +732,8 @@ class Classification(Task):
                     logits = self.backbone.scaling_logits(logits)
                     probs = nn.functional.softmax(logits, 1)
 
-                    inlier_score = self.lulclassifier(features).softmax(1)[:,0]
+                    domain_logits = self.lulclassifier(features).view(features.size(0), 2, -1)
+                    inlier_score = domain_logits.softmax(1)[torch.arange(features.size(0)),0,probs.argmax(1)]
 
                     gt_idx = y < self.backbone.class_num
 
@@ -817,14 +808,14 @@ class Classification(Task):
             if len(selected_idx) > 0:
                 selected_dataset.set_index(selected_idx)
                 
-    def cross_H_loss_func(self, logits_open, one_hot_label, lambda_em):
+    def cross_H_loss_func(self, logits_open, l_ul_label, pseudo_label):
 
+        logits_open = logits_open.view(logits_open.size(0),2,-1)[torch.arange(logits_open.size(0)),:,pseudo_label]
         probs_open = logits_open.softmax(1)
 
-        pos_losses = (-one_hot_label*torch.log(probs_open+1e-7)).sum(1)
-        entropy_losses = torch.sum(-probs_open*torch.log(probs_open + 1e-7),1)
+        pos_losses = (-nn.functional.one_hot(l_ul_label,2)*torch.log(probs_open+1e-7)).sum(1)
         
-        return pos_losses.mean() + lambda_em*entropy_losses.mean()
+        return pos_losses.mean()
     
     @staticmethod
     def clamp(smoothing_proposed):

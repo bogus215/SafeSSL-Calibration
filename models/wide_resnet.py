@@ -178,7 +178,7 @@ class Deep_Classifier(nn.Module):
         
 # Sub-Network
 class LULClassifier(nn.Module):
-    def __init__(self, feature, size, lambda_weight : float = 1e-5) -> None:
+    def __init__(self, feature, class_num, size, lambda_weight : float = 1e-5) -> None:
         super().__init__()
         
         assert size>=2
@@ -190,7 +190,7 @@ class LULClassifier(nn.Module):
             modules.append(nn.Linear(feature,feature))
             modules.append(nn.LayerNorm(feature))
             modules.append(nn.LeakyReLU(0.1))
-        modules.append(nn.Linear(feature,2,bias=False))
+        modules.append(nn.Linear(feature,2*class_num, bias=False))
         
         self.reversal = GradientReversalLayer()
         self.mlp = nn.Sequential(*modules)
