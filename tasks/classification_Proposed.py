@@ -262,8 +262,7 @@ class Classification(Task):
                     full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
                     label_logit, unlabel_logit, _ = full_logits.split(label_y.size(0))
 
-                    projected_features = self.backbone.projector(full_features[-len(unlabel_strong_x):].detach())
-                    unlabel_open_logits = self.backbone.sus_classifier(projected_features)
+                    unlabel_open_logits = self.backbone.sus_classifier(full_features[-len(unlabel_strong_x):].detach())
 
                     label_loss = self.loss_function(label_logit, label_y.long())
                     
@@ -746,7 +745,7 @@ class Classification(Task):
                     logits = self.backbone.scaling_logits(logits)
                     probs = nn.functional.softmax(logits, 1)
 
-                    domain_logits = self.backbone.sus_classifier(self.backbone.projector(features))
+                    domain_logits = self.backbone.sus_classifier(features)
                     inlier_score = domain_logits.softmax(1)[:,0]
 
                     gt_idx = y < self.backbone.class_num

@@ -85,7 +85,6 @@ def main_worker(local_rank: int, config: object):
     
     # Sub-Network Plus           
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
-    setattr(model,'projector', LULClassifier(model.output.in_features, class_num=model.output.in_features, size=3, lambda_weight=0))
     setattr(model,'sus_classifier', LULClassifier(model.output.in_features, class_num=2, size=config.layer_size, lambda_weight=0))
     initialize_weights(model)
 
