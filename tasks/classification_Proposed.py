@@ -216,6 +216,7 @@ class Classification(Task):
 
                     with torch.no_grad():
                         safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),1,unlabel_logit.argmax(1)] > tau_two
+                        safe_open_idxs = (safe_open_idxs) & (self.backbone.scaling_logits(unlabel_logit).softmax(1).max(1)[0] > tau)
 
                     if safe_open_idxs.sum().item()!=0:
                         unlabel_loss += lambda_open*ova_loss_func(ova_strong_logits[safe_open_idxs],unlabel_logit.argmax(1)[safe_open_idxs])
