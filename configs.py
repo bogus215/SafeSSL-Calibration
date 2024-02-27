@@ -233,9 +233,7 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--bn-stats-fix', action='store_true', help = "")
         parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--start-select', type=int, default=20)
-        parser.add_argument('--layer-size', type=int, default=2)
-        parser.add_argument('--lambda-weight', type=float, default=1e-5)
-        parser.add_argument('--lambda-open', type=float, default=1.0)
+        parser.add_argument('--lambda-open', type=float, default=1e-1)
         
         return parser
 

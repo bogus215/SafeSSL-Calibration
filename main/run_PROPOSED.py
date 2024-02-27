@@ -14,7 +14,7 @@ from datasets.tiny import TinyImageNet ,load_tiny
 from datasets.svhn import SVHN, load_SVHN, Selcted_DATA_Proposed
 from datasets.transforms import SemiAugment, TestAugment
 
-from models import WRN, densenet121, vgg16_bn, inceptionv4, LULClassifier
+from models import WRN, densenet121, vgg16_bn, inceptionv4
 from tasks.classification_Proposed import Classification
 
 from utils.initialization import initialize_weights
@@ -83,13 +83,10 @@ def main_worker(local_rank: int, config: object):
     else:
         logger = None
     
-    # Sub-Network Plus           
+    # Sub-Network Plus
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
-    setattr(model,'sus_classifier', LULClassifier(model.output.in_features, class_num=2, size=config.layer_size, lambda_weight=0))
+    setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
     initialize_weights(model)
-
-    lulclassifier = LULClassifier(model.output.in_features, class_num=int(2*num_classes), size=config.layer_size, lambda_weight=config.lambda_weight)
-    initialize_weights(lulclassifier)
     
     # Data (transforms & datasets)
     trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
@@ -151,7 +148,6 @@ def main_worker(local_rank: int, config: object):
         iterations=config.iterations,
         batch_size=config.batch_size,
         num_workers=config.num_workers,
-        lulclassifier=lulclassifier,
         local_rank=local_rank,
         mixed_precision=config.mixed_precision,
         gamma = config.gamma,

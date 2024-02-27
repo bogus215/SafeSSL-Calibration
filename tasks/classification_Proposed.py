@@ -12,11 +12,8 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score
 from tasks.classification import Classification as Task
 from tasks.classification_OPENMATCH import DistributedSampler
 from utils import TopKAccuracy
-from utils.optimization import get_optimizer, get_multi_step_scheduler
 from utils.logging import make_epoch_description
 from skimage.filters import threshold_otsu
-
-from torch.utils.tensorboard import SummaryWriter
 
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
@@ -26,73 +23,6 @@ import seaborn as sns
 class Classification(Task):
     def __init__(self, backbone: nn.Module):
         super(Classification, self).__init__(backbone)
-
-    def prepare(self,
-                ckpt_dir: str,
-                optimizer: str,
-                learning_rate: float,
-                iterations: int,
-                batch_size: int,
-                num_workers: int,
-                lulclassifier: nn.Module,
-                local_rank: int,
-                mixed_precision: bool,
-                gamma: float,
-                milestones: list,
-                weight_decay: float,
-                **kwargs):  # pylint: disable=unused-argument
-        """Add function docstring."""
-
-        # Set attributes
-        self.ckpt_dir = ckpt_dir                # pylint: disable=attribute-defined-outside-init
-        self.iterations = iterations            # pylint: disable=attribute-defined-outside-init
-        self.batch_size = batch_size            # pylint: disable=attribute-defined-outside-init
-        self.milestones = milestones            # pylint: disable=attribute-defined-outside-init
-        self.gamma = gamma                      # pylint: disable=attribute-defined-outside-init
-        self.num_workers = num_workers          # pylint: disable=attribute-defined-outside-init
-        self.local_rank = local_rank            # pylint: disable=attribute-defined-outside-init
-        self.mixed_precision = mixed_precision  # pylint: disable=attribute-defined-outside-init
-        self.lulclassifier = lulclassifier
-
-        self.backbone.to(local_rank)
-        self.lulclassifier.to(local_rank)
-
-        # Mixed precision training (optional)
-        self.scaler = torch.cuda.amp.GradScaler() if mixed_precision else None
-        self.scaler_d = torch.cuda.amp.GradScaler() if mixed_precision else None
-
-        # Optimization (TODO: freeze)
-        self.optimizer = get_optimizer(
-            params=[
-                {'params': self.backbone.parameters()},
-            ],
-            name=optimizer,
-            lr=learning_rate,
-            weight_decay=weight_decay
-        )
-
-        self.optimizer_d = get_optimizer(
-            params=[
-                {'params': self.lulclassifier.parameters()},
-            ],
-            name=optimizer,
-            lr=learning_rate,
-        )
-        
-        self.scheduler = get_multi_step_scheduler(
-            optimizer = self.optimizer,
-            milestones = self.milestones,
-            gamma= self.gamma
-            )
-
-        # Loss function
-        self.loss_function = nn.CrossEntropyLoss()
-
-        # TensorBoard
-        self.writer = SummaryWriter(ckpt_dir) if local_rank == 0 else None
-
-        # Ready to train!
-        self.prepared = True
 
     def run(self,
             train_set,
@@ -233,9 +163,9 @@ class Classification(Task):
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
+            'N_used_unlabeled_ova': torch.zeros(iteration, device=self.local_rank),
             "cali_temp": torch.zeros(iteration, device=self.local_rank),
-            'cali_loss': torch.zeros(iteration, device=self.local_rank),
-            'l_ul_cls_loss' : torch.zeros(iteration, device=self.local_rank)            
+            'cali_loss': torch.zeros(iteration, device=self.local_rank)
         }
         
         if self.backbone.class_num==6:
@@ -262,10 +192,9 @@ class Classification(Task):
                     full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
                     label_logit, unlabel_logit, _ = full_logits.split(label_y.size(0))
 
-                    unlabel_open_logits = self.backbone.sus_classifier(full_features[-len(unlabel_strong_x):].detach())
-
+                    ova_full_logits = self.backbone.ova_classifiers(full_features)
                     label_loss = self.loss_function(label_logit, label_y.long())
-                    
+
                     if smoothing_proposed is not None:
 
                         smoothing_proposed_surgery = self.clamp(smoothing_proposed)
@@ -278,21 +207,18 @@ class Classification(Task):
 
                         cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
                         label_loss += cali_coef*cali_loss
+
+                    label_loss += ova_loss_func(ova_full_logits[:len(label_y)],label_y.long())
                         
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
-                    domain_logits = self.lulclassifier(full_features.detach()[:-len(label_y)])
-
-                    l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),torch.ones_like(label_y.long())))
-                    l_ul_cls_loss = self.cross_H_loss_func(domain_logits, l_ul_labels, torch.cat((label_y,unlabel_logit.argmax(1)))) + self.lulclassifier.l2_norm_loss()
+                    ova_weak_logits, ova_strong_logits = ova_full_logits[len(label_y):].chunk(2)
 
                     with torch.no_grad():
-                        target_open_probs = ((domain_logits[len(label_y):].view(len(label_y),2,-1)).softmax(1))[torch.arange(len(label_x)),:,unlabel_logit.argmax(1)]
-                        safe_open_idxs = target_open_probs.max(1)[0]>tau_two
+                        safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),1,unlabel_logit.argmax(1)] > tau_two
 
                     if safe_open_idxs.sum().item()!=0:
-                        safe_open_losses = (-target_open_probs*unlabel_open_logits.log_softmax(1)).sum(1)
-                        unlabel_loss += lambda_open*((safe_open_losses[safe_open_idxs]).mean())
+                        unlabel_loss += lambda_open*ova_loss_func(ova_strong_logits[safe_open_idxs],unlabel_logit.argmax(1)[safe_open_idxs])
 
                     if current_epoch >= start_fix:
 
@@ -326,28 +252,18 @@ class Classification(Task):
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
-
-                    self.scaler_d.scale(l_ul_cls_loss).backward()
-                    self.scaler_d.step(self.optimizer_d)
-                    self.scaler_d.update()
-
                 else:
                     loss.backward()
                     self.optimizer.step()
 
-                    l_ul_cls_loss.backward()
-                    self.optimizer_d.step()
-
                 self.optimizer.zero_grad()
-                self.optimizer_d.zero_grad()
-
                 self.trained_iteration+=1
                 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
                 result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
-                result['l_ul_cls_loss'][i] = l_ul_cls_loss.detach()
+                result["N_used_unlabeled_ova"][i] = safe_open_idxs.sum().item()
 
                 if smoothing_proposed is not None:
                     result['cali_loss'][i] = cali_loss.detach()
@@ -745,8 +661,8 @@ class Classification(Task):
                     logits = self.backbone.scaling_logits(logits)
                     probs = nn.functional.softmax(logits, 1)
 
-                    domain_logits = self.backbone.sus_classifier(features)
-                    inlier_score = domain_logits.softmax(1)[:,0]
+                    ova_logits = self.backbone.ova_classifiers(features).view(features.size(0),2,-1)
+                    inlier_score = ova_logits.softmax(1)[torch.arange(len(ova_logits)),1,probs.argmax(1)]
 
                     gt_idx = y < self.backbone.class_num
 
@@ -821,15 +737,6 @@ class Classification(Task):
             if len(selected_idx) > 0:
                 selected_dataset.set_index(selected_idx)
                 
-    def cross_H_loss_func(self, logits_open, l_ul_label, pseudo_label):
-
-        logits_open = logits_open.view(logits_open.size(0),2,-1)[torch.arange(logits_open.size(0)),:,pseudo_label]
-        probs_open = logits_open.softmax(1)
-
-        pos_losses = (-nn.functional.one_hot(l_ul_label,2)*torch.log(probs_open+1e-7)).sum(1)
-        
-        return pos_losses.mean()
-    
     @staticmethod
     def clamp(smoothing_proposed):
         
@@ -874,8 +781,7 @@ class Classification(Task):
     def save_checkpoint(self, path: str, **kwargs):
         ckpt = {
             'backbone': self.backbone.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'd_classifier': self.lulclassifier.state_dict()
+            'optimizer': self.optimizer.state_dict()
         }
         if kwargs:
             ckpt.update(kwargs)
