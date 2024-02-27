@@ -235,7 +235,7 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--start-select', type=int, default=20)
         parser.add_argument('--layer-size', type=int, default=2)
         parser.add_argument('--lambda-weight', type=float, default=1e-5)
-        parser.add_argument('--lambda-open', type=float, default=1e-1)
+        parser.add_argument('--lambda-open', type=float, default=1.0)
         
         return parser
 
