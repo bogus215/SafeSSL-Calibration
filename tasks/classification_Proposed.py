@@ -33,6 +33,7 @@ class Classification(Task):
             tau,
             tau_two,
             lambda_open,
+            lambda_em,
             cali_coef,
             bn_stats_fix,
             start_fix: int =5,
@@ -85,7 +86,7 @@ class Classification(Task):
             selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
 
             train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
-                                                         tau=tau,tau_two=tau_two,lambda_open=lambda_open,cali_coef=cali_coef,
+                                                         tau=tau,tau_two=tau_two,lambda_open=lambda_open,lambda_em=lambda_em,cali_coef=cali_coef,
                                                          current_epoch=epoch, start_fix=start_fix,
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
@@ -150,7 +151,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, tau_two, lambda_open, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, tau_two, lambda_open, lambda_em, cali_coef, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(selected_unlabel_loader)
@@ -187,9 +188,9 @@ class Classification(Task):
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
-                    unlabel_strong_x = data_ulb['x_ulb_s'].to(self.local_rank)
+                    unlabel_weak_t_x = data_ulb['x_ulb_w_t'].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_weak_t_x],axis=0))
                     label_logit, unlabel_logit, _ = full_logits.split(label_y.size(0))
 
                     ova_full_logits = self.backbone.ova_classifiers(full_features)
@@ -212,14 +213,14 @@ class Classification(Task):
                         
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
-                    ova_weak_logits, ova_strong_logits = ova_full_logits[len(label_y):].chunk(2)
+                    ova_weak_logits, ova_weak_t_logits = ova_full_logits[len(label_y):].chunk(2)
 
                     with torch.no_grad():
-                        safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),1,unlabel_logit.argmax(1)] > tau_two
-                        safe_open_idxs = (safe_open_idxs) & (self.backbone.scaling_logits(unlabel_logit).softmax(1).max(1)[0] > tau)
+                        safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),:,unlabel_logit.argmax(1)].max(1)[0] > tau_two
 
                     if safe_open_idxs.sum().item()!=0:
-                        unlabel_loss += lambda_open*ova_loss_func(ova_strong_logits[safe_open_idxs],unlabel_logit.argmax(1)[safe_open_idxs])
+                        unlabel_loss += lambda_open*socr_loss_func(ova_weak_logits[safe_open_idxs], ova_weak_t_logits[safe_open_idxs])
+                        unlabel_loss += lambda_em*em_loss_func(ova_weak_logits[safe_open_idxs], ova_weak_t_logits[safe_open_idxs])
 
                     if current_epoch >= start_fix:
 
@@ -801,3 +802,25 @@ def ova_loss_func(logits_open, label):
     open_loss_neg = torch.mean(torch.max(-torch.log(logits_open[:, 0, :] + 1e-8) * label_sp_neg, 1)[0])
     l_ova = open_loss_neg + open_loss
     return l_ova
+
+def socr_loss_func(logits_open_u1, logits_open_u2):
+    # Eq.(3) in the paper
+    logits_open_u1 = logits_open_u1.view(logits_open_u1.size(0), 2, -1)
+    logits_open_u2 = logits_open_u2.view(logits_open_u2.size(0), 2, -1)
+    logits_open_u1 = nn.functional.softmax(logits_open_u1, 1)
+    logits_open_u2 = nn.functional.softmax(logits_open_u2, 1)
+    l_socr = torch.mean(torch.sum(torch.sum(torch.abs(
+        logits_open_u1 - logits_open_u2) ** 2, 1), 1))
+    return l_socr
+
+def em_loss_func(logits_open_u1, logits_open_u2):
+    # Eq.(2) in the paper
+    def em(logits_open):
+        logits_open = logits_open.view(logits_open.size(0), 2, -1)
+        logits_open = nn.functional.softmax(logits_open, 1)
+        _l_em = torch.mean(torch.mean(torch.sum(-logits_open * torch.log(logits_open + 1e-8), 1), 1))
+        return _l_em
+
+    l_em = (em(logits_open_u1) + em(logits_open_u2)) / 2
+
+    return l_em

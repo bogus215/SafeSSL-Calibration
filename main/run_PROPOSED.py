@@ -166,6 +166,7 @@ def main_worker(local_rank: int, config: object):
         tau=config.tau,
         tau_two=config.tau_two,
         lambda_open=config.lambda_open,
+        lambda_em=config.lambda_em,
         cali_coef=config.cali_coef,
         start_fix=config.start_fix,
         start_select=config.start_select,
