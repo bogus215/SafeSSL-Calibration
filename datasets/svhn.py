@@ -274,7 +274,7 @@ class Selcted_DATA_Proposed(Dataset):
             weak_img = self.transform(img)
 
         if self.name == 'train_lb':
-            return {'idx_lb': data_idx, 'x_lb': weak_img, 'x_lb_t': self.transform(img), 'y_lb': target}
+            return {'idx_lb': data_idx, 'x_lb': weak_img, 'y_lb': target}
         elif self.name == 'train_ulb':
             return {'idx_ulb': data_idx, 'x_ulb_w': weak_img, 'x_ulb_w_t': self.transform(img) ,'y_ulb': target}
         elif self.name == 'train_ulb_selected':

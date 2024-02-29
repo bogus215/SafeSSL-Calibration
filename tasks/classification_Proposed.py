@@ -185,17 +185,16 @@ class Classification(Task):
                 with torch.cuda.amp.autocast(self.mixed_precision):
 
                     label_x = data_lb['x_lb'].to(self.local_rank)
-                    labelx_2 = data_lb['x_lb_t'].to(self.local_rank)
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
                     unlabel_weak_t_x = data_ulb['x_ulb_w_t'].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, labelx_2, unlabel_weak_x, unlabel_weak_t_x],axis=0))
-                    label_logit, unlabel_logit = full_logits.chunk(2)
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_weak_t_x],axis=0))
+                    label_logit, unlabel_logit, _ = full_logits.chunk(3)
 
                     ova_full_logits = self.backbone.ova_classifiers(full_features)
-                    label_loss = self.loss_function(label_logit, label_y.repeat(2))
+                    label_loss = self.loss_function(label_logit, label_y)
 
                     if smoothing_proposed is not None:
 
@@ -204,20 +203,20 @@ class Classification(Task):
                         labeled_confidence = label_logit.softmax(dim=-1).max(1)[0].detach()
                         label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery)
 
-                        for_one_hot_label = nn.functional.one_hot(label_y.repeat(2),num_classes=self.backbone.output.out_features)
+                        for_one_hot_label = nn.functional.one_hot(label_y,num_classes=self.backbone.output.out_features)
                         for_smoothoed_target_label = (label_confidence_surgery.view(-1,1)*(for_one_hot_label==1) + ((1-label_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_label!=1))
 
-                        cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
+                        cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-7)*for_smoothoed_target_label,axis=1)))
                         label_loss += cali_coef*cali_loss
 
-                    label_loss += ova_loss_func(ova_full_logits[:2*len(label_y)],label_y.repeat(2))
+                    label_loss += ova_loss_func(ova_full_logits[:len(label_y)],label_y)
                         
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
-                    ova_weak_logits, ova_weak_t_logits = ova_full_logits[2*len(label_y):].chunk(2)
+                    ova_weak_logits, ova_weak_t_logits = ova_full_logits[len(label_y):].chunk(2)
 
                     with torch.no_grad():
-                        safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),:,unlabel_logit.chunk(2)[0].argmax(1)].max(1)[0] > tau_two
+                        safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),:,unlabel_logit.argmax(1)].max(1)[0] > tau_two
 
                     if safe_open_idxs.sum().item()!=0:
                         unlabel_loss += lambda_open*socr_loss_func(ova_weak_logits[safe_open_idxs], ova_weak_t_logits[safe_open_idxs])
@@ -263,8 +262,8 @@ class Classification(Task):
                 self.trained_iteration+=1
                 
                 result['loss'][i] = loss.detach()
-                result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y.repeat(2)).detach()
-                result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.repeat(2).cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
+                result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
                 result["N_used_unlabeled_ova"][i] = safe_open_idxs.sum().item()
 
