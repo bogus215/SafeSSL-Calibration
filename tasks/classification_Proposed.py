@@ -185,16 +185,17 @@ class Classification(Task):
                 with torch.cuda.amp.autocast(self.mixed_precision):
 
                     label_x = data_lb['x_lb'].to(self.local_rank)
+                    labelx_2 = data_lb['x_lb_t'].to(self.local_rank)
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
                     unlabel_weak_t_x = data_ulb['x_ulb_w_t'].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_weak_t_x],axis=0))
-                    label_logit, unlabel_logit, _ = full_logits.split(label_y.size(0))
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, labelx_2, unlabel_weak_x, unlabel_weak_t_x],axis=0))
+                    label_logit, unlabel_logit = full_logits.chunk(2)
 
                     ova_full_logits = self.backbone.ova_classifiers(full_features)
-                    label_loss = self.loss_function(label_logit, label_y.long())
+                    label_loss = self.loss_function(label_logit, label_y.repeat(2))
 
                     if smoothing_proposed is not None:
 
@@ -203,20 +204,20 @@ class Classification(Task):
                         labeled_confidence = label_logit.softmax(dim=-1).max(1)[0].detach()
                         label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery)
 
-                        for_one_hot_label = nn.functional.one_hot(label_y,num_classes=self.backbone.output.out_features)
+                        for_one_hot_label = nn.functional.one_hot(label_y.repeat(2),num_classes=self.backbone.output.out_features)
                         for_smoothoed_target_label = (label_confidence_surgery.view(-1,1)*(for_one_hot_label==1) + ((1-label_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_label!=1))
 
                         cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
                         label_loss += cali_coef*cali_loss
 
-                    label_loss += ova_loss_func(ova_full_logits[:len(label_y)],label_y.long())
+                    label_loss += ova_loss_func(ova_full_logits[:2*len(label_y)],label_y.repeat(2))
                         
                     unlabel_loss = torch.zeros(1).to(self.local_rank)
                     
-                    ova_weak_logits, ova_weak_t_logits = ova_full_logits[len(label_y):].chunk(2)
+                    ova_weak_logits, ova_weak_t_logits = ova_full_logits[2*len(label_y):].chunk(2)
 
                     with torch.no_grad():
-                        safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),:,unlabel_logit.argmax(1)].max(1)[0] > tau_two
+                        safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),:,unlabel_logit.chunk(2)[0].argmax(1)].max(1)[0] > tau_two
 
                     if safe_open_idxs.sum().item()!=0:
                         unlabel_loss += lambda_open*socr_loss_func(ova_weak_logits[safe_open_idxs], ova_weak_t_logits[safe_open_idxs])
@@ -246,7 +247,7 @@ class Classification(Task):
                         used_unlabeled_index = unlabel_confidence>tau
 
                         if used_unlabeled_index.sum().item() != 0:
-                            unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
+                            unlabel_loss += self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                 
                     loss = label_loss + unlabel_loss
                   
@@ -262,8 +263,8 @@ class Classification(Task):
                 self.trained_iteration+=1
                 
                 result['loss'][i] = loss.detach()
-                result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
-                result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y.repeat(2)).detach()
+                result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.repeat(2).cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
                 result["N_used_unlabeled_ova"][i] = safe_open_idxs.sum().item()
 
@@ -664,7 +665,7 @@ class Classification(Task):
                     probs = nn.functional.softmax(logits, 1)
 
                     ova_logits = self.backbone.ova_classifiers(features).view(features.size(0),2,-1)
-                    inlier_score = ova_logits.softmax(1)[torch.arange(len(ova_logits)),1,probs.argmax(1)]
+                    outlier_score = ova_logits.softmax(1)[torch.arange(len(ova_logits)),0,probs.argmax(1)]
 
                     gt_idx = y < self.backbone.class_num
 
@@ -672,20 +673,19 @@ class Classification(Task):
                         gt_all = gt_idx
                         probs_all, logits_all = probs, logits
                         labels_all = y
-                        inlier_score_all = inlier_score
+                        outlier_score_all = outlier_score
                     else:
                         gt_all = torch.cat([gt_all, gt_idx], 0)
                         probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
                         labels_all = torch.cat([labels_all, y], 0)
-                        inlier_score_all = torch.cat([inlier_score_all, inlier_score], 0)
+                        outlier_score_all = torch.cat([outlier_score_all, outlier_score], 0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
-        Otsu = threshold_otsu(inlier_score_all.cpu().numpy())
-        select_all = inlier_score_all > Otsu
+        select_all = outlier_score_all < 0.5
 
         select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
@@ -701,7 +701,6 @@ class Classification(Task):
             self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
             self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
             self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
-            self.writer.add_scalar('Otsu',Otsu,global_step=current_epoch)
 
             if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
                 self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
