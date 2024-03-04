@@ -235,7 +235,8 @@ class Classification(Task):
                         if self.bn_stats_fix:
                             self.backbone.update_batch_stats(False)
 
-                        selected_logits = self.backbone(inputs_selected)
+                        selected_logits, selected_features = self.get_feature(inputs_selected)
+                        selected_ova_logits = self.backbone.ova_classifiers(selected_features).view(len(selected_features),2,-1)[:,1,:]
 
                         if self.bn_stats_fix:
                             self.backbone.update_batch_stats(True)
@@ -244,7 +245,8 @@ class Classification(Task):
                         unlabel_weak_scaled_logit = self.backbone.scaling_logits(unlabel_weak_logit)
                         
                         unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_logit.softmax(1).max(1)
-                        used_unlabeled_index = unlabel_confidence>tau
+                        _, unlabel_ova_pseudo_y = selected_ova_logits.split(x_ulb_s.size(0))[0].max(1)
+                        used_unlabeled_index = (unlabel_confidence>tau) & (unlabel_pseudo_y == unlabel_ova_pseudo_y)
 
                         if used_unlabeled_index.sum().item() != 0:
                             unlabel_loss += self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
