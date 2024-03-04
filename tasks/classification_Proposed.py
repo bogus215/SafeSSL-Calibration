@@ -665,7 +665,7 @@ class Classification(Task):
                     probs = nn.functional.softmax(logits, 1)
 
                     ova_logits = self.backbone.ova_classifiers(features).view(features.size(0),2,-1)
-                    outlier_score = ova_logits.softmax(1)[torch.arange(len(ova_logits)),0,probs.argmax(1)]
+                    outlier_score = (ova_logits.softmax(1)[:,0,:] * probs).sum(1)
 
                     gt_idx = y < self.backbone.class_num
 
