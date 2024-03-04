@@ -160,6 +160,7 @@ class Classification(Task):
         result = {
             'loss': torch.zeros(iteration, device=self.local_rank),
             'top@1': torch.zeros(iteration, device=self.local_rank),
+            'ova-top@1': torch.zeros(iteration, device=self.local_rank),
             'ece': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
@@ -263,6 +264,7 @@ class Classification(Task):
                 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
+                result['ova-top@1'][i] = TopKAccuracy(k=1)(ova_full_logits[:len(label_y)].view(len(label_y),2,-1).softmax(1)[:,1,:], label_y).detach()
                 result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
                 result["N_used_unlabeled_ova"][i] = safe_open_idxs.sum().item()
@@ -307,36 +309,34 @@ class Classification(Task):
         result = {
             'loss': torch.zeros(steps, device=self.local_rank),
             'top@1': torch.zeros(1, device=self.local_rank),
+            'ova-top@1': torch.zeros(1, device=self.local_rank),
             'ece': torch.zeros(1, device=self.local_rank)
         }
-
-        swa_on = kwargs.get('swa_on',False)
-        swa_start = kwargs.get('swa_start',100000)
 
         with Progress(transient=True, auto_refresh=False) as pg:
 
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Evaluating...", total=steps)
 
-            pred,true,IDX=[],[],[]
+            pred,true,ova_pred,IDX=[],[],[],[]
             for i, batch in enumerate(data_loader):
 
                 x = batch['x'].to(self.local_rank)
                 y = batch['y'].to(self.local_rank)
                 idx = batch['idx'].to(self.local_rank)
 
-                if swa_on and self.trained_iteration>=swa_start:
-                    logits = self.swa_model(x)
-                    logits = self.swa_model.scaling_logits(logits)
-                else:
-                    logits = self.predict(x)
-                    logits = self.backbone.scaling_logits(logits)
-                    
+                logits, features = self.get_feature(x)
+                logits = self.backbone.scaling_logits(logits)
+
                 loss = self.loss_function(logits, y.long())
+
+                ova_logits = self.backbone.ova_classifiers(features).view(features.size(0),2,-1)
+                ova_logits = ova_logits.softmax(1)[:,1,:]
 
                 result['loss'][i] = loss
                 true.append(y.cpu())
                 pred.append(logits.cpu())
+                ova_pred.append(ova_logits.cpu())
                 IDX += [idx]
                 
                 if self.local_rank == 0:
@@ -345,8 +345,9 @@ class Classification(Task):
                     pg.refresh()
 
         # preds, pred are logit vectors
-        preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
+        preds, trues, ova_preds = torch.cat(pred,axis=0), torch.cat(true,axis=0), torch.cat(ova_pred)
         result['top@1'][0] = TopKAccuracy(k=1)(preds, trues)
+        result['ova-top@1'][0] = TopKAccuracy(k=1)(ova_preds, trues)
 
         ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=n_bins, plot=False)
         result['ece'][0] = ece_results[0]
