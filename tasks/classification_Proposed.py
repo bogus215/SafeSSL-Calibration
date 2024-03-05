@@ -7,7 +7,7 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 from tasks.classification import Classification as Task
 from tasks.classification_OPENMATCH import DistributedSampler
@@ -29,15 +29,19 @@ class Classification(Task):
             eval_set,
             test_set,
             open_test_set,
+
             save_every,
             tau,
-            tau_two,
-            lambda_open,
-            lambda_em,
-            cali_coef,
-            bn_stats_fix,
+
+            lambda_cali,
+            lambda_open_em,
+            lambda_ova_soft,
+            lambda_ova_em,
+            lambda_ova,
+            lambda_fix,
+
             start_fix: int =5,
-            start_select: int =5,
+
             n_bins: int = 15,
             train_n_bins: int = 30,
             **kwargs):  # pylint: disable=unused-argument
@@ -69,7 +73,6 @@ class Classification(Task):
         best_epoch    = 0
 
         self.trained_iteration = 0
-        self.bn_stats_fix = bn_stats_fix
         
         if self.ckpt_dir.split("/")[2] in ['cifar10','svhn'] and enable_plot:
             label_loader = DataLoader(train_set[0],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
@@ -79,17 +82,25 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_select,current_epoch=epoch)
+            otsu = self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1],current_epoch=epoch)
 
-            # Train & evaluate
-            u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
-            selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
+            train_history, cls_wise_results = self.train(label_loader=l_loader,
+                                                         unlabel_loader=u_loader,
+                                                         current_epoch=epoch,
+                                                         start_fix=start_fix,
+                                                         tau=tau,
+                                                         otsu=otsu,
 
-            train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
-                                                         tau=tau,tau_two=tau_two,lambda_open=lambda_open,lambda_em=lambda_em,cali_coef=cali_coef,
-                                                         current_epoch=epoch, start_fix=start_fix,
+                                                         lambda_cali=lambda_cali,
+                                                         lambda_open_em=lambda_open_em,
+                                                         lambda_ova_soft=lambda_ova_soft,
+                                                         lambda_ova_em=lambda_ova_em,
+                                                         lambda_ova=lambda_ova,
+                                                         lambda_fix=lambda_fix,
+
                                                          smoothing_proposed=None if epoch==1 else ece_results,
                                                          n_bins=n_bins)
+
             eval_history, ece_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
             try:
                 if self.ckpt_dir.split("/")[2] in ['cifar10','svhn'] and enable_plot:
@@ -151,23 +162,31 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, tau_two, lambda_open, lambda_em, cali_coef, smoothing_proposed, n_bins):
+    def train(self, label_loader, unlabel_loader, current_epoch, start_fix, tau, otsu, lambda_cali, lambda_open_em, lambda_ova_soft, lambda_ova_em, lambda_ova, lambda_fix, smoothing_proposed, n_bins):
         """Training defined for a single epoch."""
 
-        iteration = len(selected_unlabel_loader)
+        iteration = len(label_loader)
 
         self._set_learning_phase(train=True)
         result = {
             'loss': torch.zeros(iteration, device=self.local_rank),
+
+            'label_sup': torch.zeros(iteration, device=self.local_rank),
+            'label_cali': torch.zeros(iteration, device=self.local_rank),
+            'label_ova': torch.zeros(iteration, device=self.local_rank),
+
+            'unlabel_fix': torch.zeros(iteration, device=self.local_rank),
+            'unlabel_ova_socr': torch.zeros(iteration, device=self.local_rank),
+            'unlabel_ova_em': torch.zeros(iteration, device=self.local_rank),
+            'unlabel_open_em': torch.zeros(iteration, device=self.local_rank),
+
             'top@1': torch.zeros(iteration, device=self.local_rank),
             'ova-top@1': torch.zeros(iteration, device=self.local_rank),
             'ece': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
-            'N_used_unlabeled_ova': torch.zeros(iteration, device=self.local_rank),
-            "cali_temp": torch.zeros(iteration, device=self.local_rank),
-            'cali_loss': torch.zeros(iteration, device=self.local_rank)
+            "cali_temp": torch.zeros(iteration, device=self.local_rank)
         }
         
         if self.backbone.class_num==6:
@@ -182,7 +201,7 @@ class Classification(Task):
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Training...", total=iteration)
 
-            for i, (data_lb, data_ulb, data_ulb_selected) in enumerate(zip(label_loader, unlabel_loader, selected_unlabel_loader)):
+            for i, (data_lb, data_ulb) in enumerate(zip(label_loader, unlabel_loader)):
                 with torch.cuda.amp.autocast(self.mixed_precision):
 
                     label_x = data_lb['x_lb'].to(self.local_rank)
@@ -190,12 +209,22 @@ class Classification(Task):
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
                     unlabel_weak_t_x = data_ulb['x_ulb_w_t'].to(self.local_rank)
+                    unlabel_y = data_ulb['y_ulb'].to(self.local_rank)
+                    x_ulb_s = data_ulb["x_ulb_s"].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_weak_t_x],axis=0))
-                    label_logit, unlabel_logit, _ = full_logits.chunk(3)
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_weak_t_x, x_ulb_s],axis=0))
+                    label_logit, weak_logit, _, strong_logit = full_logits.chunk(4)
 
                     ova_full_logits = self.backbone.ova_classifiers(full_features)
-                    label_loss = self.loss_function(label_logit, label_y)
+                    label_ova_logit, weak_ova_logit, weak_ova_t_logit, _ = ova_full_logits.chunk(4)
+
+                    label_sup_loss = self.loss_function(label_logit, label_y)
+
+                    label_ova_loss = ova_loss_func(label_ova_logit,label_y)
+                    ova_soft_loss = socr_loss_func(weak_ova_logit, weak_ova_t_logit)
+                    ova_em_loss = em_loss_func(weak_ova_logit, weak_ova_t_logit)
+
+                    cali_loss = torch.tensor(0).cuda(self.local_rank)
 
                     if smoothing_proposed is not None:
 
@@ -207,52 +236,30 @@ class Classification(Task):
                         for_one_hot_label = nn.functional.one_hot(label_y,num_classes=self.backbone.output.out_features)
                         for_smoothoed_target_label = (label_confidence_surgery.view(-1,1)*(for_one_hot_label==1) + ((1-label_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_label!=1))
 
-                        cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-7)*for_smoothoed_target_label,axis=1)))
-                        label_loss += cali_coef*cali_loss
+                        cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
 
-                    label_loss += ova_loss_func(ova_full_logits[:len(label_y)],label_y)
-                        
-                    unlabel_loss = torch.zeros(1).to(self.local_rank)
-                    
-                    ova_weak_logits, ova_weak_t_logits = ova_full_logits[len(label_y):].chunk(2)
-
-                    with torch.no_grad():
-                        safe_open_idxs = (ova_weak_logits.view(len(unlabel_weak_x),2,-1)).softmax(1)[torch.arange(len(label_x)),:,unlabel_logit.argmax(1)].max(1)[0] > tau_two
-
-                    if safe_open_idxs.sum().item()!=0:
-                        unlabel_loss += lambda_open*socr_loss_func(ova_weak_logits[safe_open_idxs], ova_weak_t_logits[safe_open_idxs])
-                        unlabel_loss += lambda_em*em_loss_func(ova_weak_logits[safe_open_idxs], ova_weak_t_logits[safe_open_idxs])
+                    fix_loss = torch.tensor(0).cuda(self.local_rank)
+                    open_em_loss = torch.tensor(0).cuda(self.local_rank)
 
                     if current_epoch >= start_fix:
 
-                        x_ulb_w = data_ulb_selected["x_ulb_w"].to(self.local_rank)
-                        x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
-
-                        unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
-
-                        inputs_selected = torch.cat((x_ulb_w, x_ulb_s), 0)
-                        
-                        if self.bn_stats_fix:
-                            self.backbone.update_batch_stats(False)
-
-                        selected_logits, selected_features = self.get_feature(inputs_selected)
-                        selected_ova_logits = self.backbone.ova_classifiers(selected_features).view(len(selected_features),2,-1)[:,1,:]
-
-                        if self.bn_stats_fix:
-                            self.backbone.update_batch_stats(True)
-
-                        unlabel_weak_logit, unlabel_strong_logit = selected_logits.split(x_ulb_s.size(0))
-                        unlabel_weak_scaled_logit = self.backbone.scaling_logits(unlabel_weak_logit)
-                        
-                        unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_logit.softmax(1).max(1)
-                        _, unlabel_ova_pseudo_y = selected_ova_logits.split(x_ulb_s.size(0))[0].max(1)
-                        used_unlabeled_index = (unlabel_confidence>tau) & (unlabel_pseudo_y == unlabel_ova_pseudo_y)
+                        with torch.no_grad():
+                            unlabel_weak_scaled_logit = self.backbone.scaling_logits(weak_logit)
+                            unlabel_weak_scaled_softmax = unlabel_weak_scaled_logit.softmax(1)
+                            unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_softmax.max(1)
+                            
+                            ood_score = (((weak_ova_logit.detach()).view(len(unlabel_weak_x),2,-1).softmax(1))[:,0,:] * unlabel_weak_scaled_softmax).sum(1)
+                            used_unlabeled_index = (ood_score < otsu) & (unlabel_confidence > tau)
+                            used_unlabeled_ood_index = ood_score > min(otsu+0.1, 0.95)
 
                         if used_unlabeled_index.sum().item() != 0:
-                            unlabel_loss += self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
+                            fix_loss = self.loss_function(strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                 
-                    loss = label_loss + unlabel_loss
+                        if used_unlabeled_ood_index.sum().item() != 0:
+                            open_em_loss = (weak_logit.softmax(1).neg() * torch.log(weak_logit.softmax(1)+1e-8)).sum(1)[used_unlabeled_ood_index]
                   
+                    loss = label_sup_loss + lambda_cali*cali_loss + lambda_ova*label_ova_loss + lambda_ova_soft*ova_soft_loss + lambda_ova_em*ova_em_loss + lambda_fix*fix_loss + lambda_open_em*open_em_loss
+
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.optimizer)
@@ -265,18 +272,24 @@ class Classification(Task):
                 self.trained_iteration+=1
                 
                 result['loss'][i] = loss.detach()
+
+                result['label_sup'][i] = label_sup_loss.detach()
+                result['label_cali'][i] = cali_loss.detach()
+                result['label_ova'][i] = label_ova_loss.detach()
+
+                result['unlabel_ova_socr'][i] = ova_soft_loss.detach()
+                result['unlabel_ova_em'][i] = ova_em_loss.detach()
+                result['unlabel_open_em'][i] = open_em_loss.detach()
+                result['unlabel_fix'][i] = fix_loss.detach()
+
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
-                result['ova-top@1'][i] = TopKAccuracy(k=1)(ova_full_logits[:len(label_y)].view(len(label_y),2,-1).softmax(1)[:,1,:], label_y).detach()
+                result['ova-top@1'][i] = TopKAccuracy(k=1)(label_ova_logit.view(len(label_y),2,-1).softmax(1)[:,1,:], label_y).detach()
                 result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
-                result["N_used_unlabeled_ova"][i] = safe_open_idxs.sum().item()
-
-                if smoothing_proposed is not None:
-                    result['cali_loss'][i] = cali_loss.detach()
 
                 if current_epoch>=start_fix:
                     if used_unlabeled_index.sum().item()!=0:
-                        result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
+                        result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
                         result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_scaled_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
                                                                   targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                     result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
@@ -643,7 +656,7 @@ class Classification(Task):
         if return_results:
             return preds, trues, FEATURE, CLS_LOSS_IN, IDX
         
-    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch):
+    def logging_unlabeled_dataset(self,unlabeled_dataset,current_epoch):
 
         loader = DataLoader(dataset=unlabeled_dataset,
                             batch_size=128,
@@ -668,6 +681,8 @@ class Classification(Task):
 
                     ova_logits = self.backbone.ova_classifiers(features).view(features.size(0),2,-1)
                     outlier_score = (ova_logits.softmax(1)[:,0,:] * probs).sum(1)
+                    
+                    ova_in_logits = ova_logits.softmax(1)[:,1,:]
 
                     gt_idx = y < self.backbone.class_num
 
@@ -675,43 +690,54 @@ class Classification(Task):
                         gt_all = gt_idx
                         probs_all, logits_all = probs, logits
                         labels_all = y
+                        ova_in_all = ova_in_logits
                         outlier_score_all = outlier_score
                     else:
                         gt_all = torch.cat([gt_all, gt_idx], 0)
                         probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
                         labels_all = torch.cat([labels_all, y], 0)
                         outlier_score_all = torch.cat([outlier_score_all, outlier_score], 0)
+                        ova_in_all = torch.cat([ova_in_all, ova_in_logits],0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
-        select_all = outlier_score_all < 0.5
+        otsu = threshold_otsu(outlier_score_all.cpu().numpy())
+        select_all = outlier_score_all < otsu
 
         select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
         select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_f1 = f1_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
 
         selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
 
         # Write TensorBoard summary
         if self.writer is not None:
+            self.writer.add_scalar('Otsu', otsu, global_step=current_epoch)
+
             self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
             self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
             self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('Selected f1', select_f1, global_step=current_epoch)
             self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
+
             self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
             self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
 
             if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
                 self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
                 self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
                 self.writer.add_scalar('Selected ratio of i.d over conf 0.95', ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum() / gt_all.sum() , global_step=current_epoch)
 
             if ((gt_all) & (select_all)).sum()>0:
                 self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
                 self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('In distribution under ood score 0.5: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
                 self.writer.add_scalar('Selected ratio of i.d under ood score 0.5', ((gt_all) & (select_all)).sum() / gt_all.sum() , global_step=current_epoch)
 
             if (probs_all.max(1)[0]>=0.95).sum()>0:
@@ -735,11 +761,8 @@ class Classification(Task):
                 self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum(), global_step=current_epoch)
                 self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
 
-        self._set_learning_phase(train=True)
-        if current_epoch >= start_fix:
-            if len(selected_idx) > 0:
-                selected_dataset.set_index(selected_idx)
-                
+        return otsu
+                    
     @staticmethod
     def clamp(smoothing_proposed):
         

@@ -99,7 +99,6 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA_Proposed(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
         unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
 
         eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -111,7 +110,6 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA_Proposed(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
         unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
 
         eval_set = TinyImageNet(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = TinyImageNet(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -123,7 +121,6 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA_Proposed(data_name=config.data, dataset=datasets['l_train'], name='train_lb',transform=train_trans)
         unlabeled_set = Selcted_DATA_Proposed(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
 
         eval_set = SVHN(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -158,22 +155,26 @@ def main_worker(local_rank: int, config: object):
     # Train & evaluate
     start = time.time()
     model.run(
-        train_set=[labeled_set,unlabeled_set,selcted_unlabeled_set],
+        train_set=[labeled_set,unlabeled_set],
         eval_set=eval_set,
         test_set=test_set,
         open_test_set=open_test_set,
+
         save_every=config.save_every,
         tau=config.tau,
-        tau_two=config.tau_two,
-        lambda_open=config.lambda_open,
-        lambda_em=config.lambda_em,
-        cali_coef=config.cali_coef,
+
+        lambda_cali=config.lambda_cali,
+        lambda_open_em=config.lambda_open_em,
+        lambda_ova_soft=config.lambda_ova_soft,
+        lambda_ova_em=config.lambda_ova_em,
+        lambda_ova=config.lambda_ova,
+        lambda_fix=config.lambda_fix,
+
         start_fix=config.start_fix,
-        start_select=config.start_select,
+
         n_bins=config.n_bins,
         train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,
-        bn_stats_fix=config.bn_stats_fix,
         logger=logger
     )
     elapsed_sec = time.time() - start
