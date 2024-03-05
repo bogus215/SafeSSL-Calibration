@@ -256,7 +256,7 @@ class Classification(Task):
                             fix_loss = self.loss_function(strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                 
                         if used_unlabeled_ood_index.sum().item() != 0:
-                            open_em_loss = (weak_logit.softmax(1).neg() * torch.log(weak_logit.softmax(1)+1e-8)).sum(1)[used_unlabeled_ood_index]
+                            open_em_loss = ((weak_logit.softmax(1).neg() * torch.log(weak_logit.softmax(1)+1e-8)).sum(1)[used_unlabeled_ood_index]).mean()
                   
                     loss = label_sup_loss + lambda_cali*cali_loss + lambda_ova*label_ova_loss + lambda_ova_soft*ova_soft_loss + lambda_ova_em*ova_em_loss + lambda_fix*fix_loss + lambda_open_em*open_em_loss
 
@@ -284,7 +284,7 @@ class Classification(Task):
 
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
                 result['ova-top@1'][i] = TopKAccuracy(k=1)(label_ova_logit.view(len(label_y),2,-1).softmax(1)[:,1,:], label_y).detach()
-                result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                result['ece'][i] = self.get_ece(preds=self.backbone.scaling_logits(label_logit).softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result["cali_temp"][i] = self.backbone.cali_scaler.item()
 
                 if current_epoch>=start_fix:
