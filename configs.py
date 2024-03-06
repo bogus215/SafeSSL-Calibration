@@ -413,7 +413,6 @@ class TestingConfig(ConfigBase):
         parser.add_argument('--checkpoint-hash', type=str, default= "2023-01-12_03-30-35" , help='')
         parser.add_argument('--for-what', type=str, default= "Proposed", required=True)
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-        parser.add_argument('--layer-size', type=int, default=2)
 
         return parser
 

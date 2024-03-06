@@ -13,7 +13,7 @@ from datasets.cifar import CIFAR, load_CIFAR
 from datasets.transforms import SemiAugment, TestAugment
 from datasets.tiny import TinyImageNet ,load_tiny
 from datasets.svhn import SVHN, load_SVHN
-from models import WRN, LULClassifier
+from models import WRN
 from tasks.testing import Testing
 from utils.gpu import set_gpu
 from utils.logging import get_rich_logger
@@ -71,8 +71,8 @@ def main_worker(local_rank: int, config: object):
     test_trans = AUGMENTS[config.test_augment](**trans_kwargs)
 
     if config.for_what=="Proposed":
-        setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size, lambda_weight=0))
         setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+        setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
     elif config.for_what=='IOMATCH':
         setattr(model,'mlp_proj', nn.Sequential(nn.Linear(model.output.in_features,model.output.in_features),nn.ReLU(),nn.Linear(model.output.in_features,model.output.in_features)))
         setattr(model,'mb_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2)))

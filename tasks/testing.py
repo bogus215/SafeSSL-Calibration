@@ -6,6 +6,7 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
+from skimage.filters import threshold_otsu
 
 from tasks.base import Task
 from utils.metrics import TopKAccuracy
@@ -271,12 +272,11 @@ class Testing(Task):
             'top@1': torch.zeros(1, device=self.local_rank),
             'ECE': np.zeros(1),
             "F1": np.zeros(1),
-            "AUROC": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
         }
 
-        labels, logits, domain_logits = [], [], []
+        labels, logits, out_scores = [], [], []
 
         with Progress(transient=True, auto_refresh=False) as pg:
 
@@ -288,29 +288,30 @@ class Testing(Task):
                 x = batch['x'].to(self.local_rank)
                 y = batch['y'].to(self.local_rank)
 
-                logit, feature = self.backbone(x, return_feature=True)
+                logit, features = self.backbone(x, return_feature=True)
                 logit = self.backbone.scaling_logits(logit)
-                domain_logit = self.backbone.mlp(feature)
+                probs = nn.functional.softmax(logit, 1)
+
+                ova_logits = self.backbone.ova_classifiers(features).view(features.size(0),2,-1)
+                outlier_score = (ova_logits.softmax(1)[:,0,:] * probs).sum(1)
                 
                 labels.append(y.cpu())
                 logits.append(logit.cpu())
-                domain_logits.append(domain_logit)
+                out_scores.append(outlier_score)
                 
                 if self.local_rank == 0:
                     desc = f"[bold pink] [{i+1}/{steps}] |"
                     pg.update(task, advance=1., description=desc)
                     pg.refresh()
 
-        labels, logits, domain_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(domain_logits,axis=0)
+        labels, logits, out_scores = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(out_scores,axis=0)
         
-        in_pred = (domain_logits.softmax(1)[:,0] >= 0.5).cpu()
+        in_pred = (out_scores < threshold_otsu(out_scores.cpu().numpy())).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
 
         result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
-        
         result['F1'][0] = f1_score(y_true=in_label, y_pred=in_pred)
-        result['AUROC'][0] = roc_auc_score(y_true=in_label, y_score=domain_logits.softmax(1)[:,0].cpu())
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
         
