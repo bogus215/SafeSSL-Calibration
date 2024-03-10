@@ -85,7 +85,9 @@ def main_worker(local_rank: int, config: object):
     
     # Sub-Network Plus
     setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+    setattr(model,'ova_cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
     setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
+
     initialize_weights(model)
     
     # Data (transforms & datasets)
@@ -164,9 +166,8 @@ def main_worker(local_rank: int, config: object):
         tau=config.tau,
 
         lambda_cali=config.lambda_cali,
-        lambda_open_em=config.lambda_open_em,
         lambda_ova_soft=config.lambda_ova_soft,
-        lambda_ova_em=config.lambda_ova_em,
+        lambda_ova_cali=config.lambda_ova_cali,
         lambda_ova=config.lambda_ova,
         lambda_fix=config.lambda_fix,
 

@@ -232,10 +232,9 @@ class ProposedConfig(ConfigBase):
         parser.add_argument('--start-fix', type=int, default=5)
 
         parser.add_argument('--lambda-cali', type=float, default=1)
-        parser.add_argument('--lambda-open-em', type=float, default=1e-1)
         parser.add_argument('--lambda-ova-soft', type=float, default=5e-1)
-        parser.add_argument('--lambda-ova-em', type=float, default=1e-1)
-        parser.add_argument('--lambda-ova', type=float, default=1)
+        parser.add_argument('--lambda-ova-cali', type=float, default=5e-1)
+        parser.add_argument('--lambda-ova', type=float, default=5e-1)
         parser.add_argument('--lambda-fix', type=float, default=1)
 
         return parser
