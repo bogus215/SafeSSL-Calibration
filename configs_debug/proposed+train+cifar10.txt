@@ -1,0 +1,15 @@
+--gpus=0
+--seed=2
+--data=cifar10
+--server=main
+--normalize
+--n-label-per-class=400
+--n-valid-per-class=500
+--mismatch-ratio=0.60
+--tau=0.95
+--save-every=5000
+--n-bins=15
+--weight-decay=0
+--lambda-ova-cali=0.1
+--lambda-ova=0.1
+--wandb-proj-v=-v20
