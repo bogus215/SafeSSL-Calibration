@@ -12,6 +12,7 @@ from tasks.classification import Classification as Task
 from utils import RandomSampler, TopKAccuracy
 from utils.logging import make_epoch_description
 
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 class Classification(Task):
     def __init__(self, backbone: nn.Module):
@@ -40,17 +41,17 @@ class Classification(Task):
         
         ## labeled 
         sampler = RandomSampler(len(train_set[0]), self.iterations * self.batch_size // 2)
-        train_l_loader = DataLoader(train_set[0],batch_size=batch_size//2, sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
+        train_l_loader = DataLoader(train_set[0],batch_size=batch_size//2, sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
         train_l_iterator = iter(train_l_loader)
         
         ## unlabeled
         sampler = RandomSampler(len(train_set[1]), self.iterations * self.batch_size // 2)
-        train_u_loader = DataLoader(train_set[1],batch_size=batch_size//2,sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=True)
+        train_u_loader = DataLoader(train_set[1],batch_size=batch_size//2,sampler=sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
         train_u_iterator = iter(train_u_loader)
         
-        label_loader = DataLoader(train_set[0],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
-        unlabel_loader = DataLoader(train_set[1],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
-        eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=True)
+        label_loader = DataLoader(train_set[0],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
+        unlabel_loader = DataLoader(train_set[1],batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
+        eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
         open_test_loader = DataLoader(open_test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
 
@@ -70,6 +71,8 @@ class Classification(Task):
         self.da_module = DistAlignQueueHook(num_classes=self.backbone.class_num, queue_length=dist_da_len, p_target_type='uniform')
         for epoch in range(1, epochs + 1):
 
+            self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1],current_epoch=epoch)
+            
             # Train & evaluate
             train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, p_cutoff=p_cutoff, q_cutoff=q_cutoff, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
@@ -103,6 +106,11 @@ class Classification(Task):
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
+
+            if logger is not None and eval_acc==1:
+                logger.info("Eval acc == 1 --> Stop training")
+                break
+
             if eval_acc > best_eval_acc:
                 best_eval_acc = eval_acc
                 best_epoch = epoch
@@ -275,6 +283,115 @@ class Classification(Task):
         open_loss_neg = torch.mean(torch.max(-torch.log(probs_ova[:, 0, :] + 1e-8) * label_sp_neg, 1)[0])
         l_ova_sup = open_loss_neg + open_loss
         return l_ova_sup   
+
+    def logging_unlabeled_dataset(self,unlabeled_dataset,current_epoch):
+
+        loader = DataLoader(dataset=unlabeled_dataset,
+                            batch_size=128,
+                            drop_last=False,
+                            shuffle=False,
+                            num_workers=4)
+
+        self._set_learning_phase(train=False)
+        
+        with torch.no_grad():
+            with Progress(transient=True, auto_refresh=False) as pg:
+                if self.local_rank == 0:
+                    task = pg.add_task(f"[bold red] Extracting...", total=len(loader))
+                for batch_idx, data in enumerate(loader):
+
+                    x = data['weak_img'].cuda(self.local_rank)
+                    y = data['y'].cuda(self.local_rank)
+
+                    outputs = self.iomatch_predict(x)
+
+                    logits_x_ulb_w = outputs['logits']
+                    logits_mb_x_ulb_w = outputs['logits_mb']
+
+                    p = nn.functional.softmax(logits_x_ulb_w, dim=-1)
+                    targets_p = p.detach()
+                    targets_p = self.da_module.dist_align(algorithm=None, probs_x_ulb=targets_p)
+
+                    logits_mb = logits_mb_x_ulb_w.view(x.size(0), 2, -1)
+                    r = nn.functional.softmax(logits_mb, 1)
+                    tmp_range = torch.arange(0, x.size(0)).long().cuda(self.local_rank)
+                    out_scores = torch.sum(targets_p * r[tmp_range, 0, :], 1)
+
+                    gt_idx = y < self.backbone.class_num
+
+                    if batch_idx == 0:
+                        gt_all = gt_idx
+                        logits_all = logits_x_ulb_w
+                        labels_all = y
+                        outlier_score_all = out_scores
+                        ova_in_all = r[:,1,:]
+                    else:
+                        gt_all = torch.cat([gt_all, gt_idx], 0)
+                        logits_all = torch.cat([logits_all, logits_x_ulb_w], 0)
+                        labels_all = torch.cat([labels_all, y], 0)
+                        outlier_score_all = torch.cat([outlier_score_all, out_scores], 0)
+                        ova_in_all = torch.cat([ova_in_all, r[:,1,:]], 0)
+                        
+                    if self.local_rank == 0:
+                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
+                        pg.update(task, advance=1., description=desc)
+                        pg.refresh()
+
+        select_all = outlier_score_all < 0.5
+
+        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
+        select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_f1 = f1_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+
+        selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
+
+        probs_all = logits_all.softmax(-1)
+        
+        # Write TensorBoard summary
+        if self.writer is not None:
+            self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
+            self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
+            self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('Selected f1', select_f1, global_step=current_epoch)
+            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
+
+            self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+
+            if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d over conf 0.95', ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum() / gt_all.sum() , global_step=current_epoch)
+
+            if ((gt_all) & (select_all)).sum()>0:
+                self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('In distribution under ood score 0.5: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d under ood score 0.5', ((gt_all) & (select_all)).sum() / gt_all.sum() , global_step=current_epoch)
+
+            if (probs_all.max(1)[0]>=0.95).sum()>0:
+                self.writer.add_scalar('Seen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum(), global_step=current_epoch)
+                
+            if select_all.sum()>0:
+                self.writer.add_scalar('Seen-class ratio under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum(), global_step=current_epoch)
+
+            if ((select_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('Seen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
 
 class DistAlignQueueHook:
     """

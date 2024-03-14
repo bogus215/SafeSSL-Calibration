@@ -104,6 +104,11 @@ class Classification(Task):
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
+
+            if logger is not None and eval_acc==1:
+                logger.info("Eval acc == 1 --> Stop training")
+                break
+
             if eval_acc > best_eval_acc:
                 best_eval_acc = eval_acc
                 best_epoch = epoch
