@@ -300,10 +300,22 @@ class MTC_DATASET(Dataset):
         self.len_label = len_label
         self.soft_labels = np.zeros((len(self.data)))
         self.soft_labels[:len_label] = 1
+        
+        self.prediction = np.zeros((len(self.data), 10), dtype=np.float32)
+        self.prediction[:self.len_label,:] = 1.0
+        self.count = 0
 
     def label_update(self, results):
 
-        self.soft_labels[self.len_label:] = results[self.len_label:].cpu().numpy()
+        self.count += 1
+        
+        idx = (self.count - 1) % 10
+        self.prediction[self.len_label:, idx] = results[self.len_label:].cpu().numpy()
+        
+        if self.count >= 10:
+            self.soft_labels = self.prediction.mean(axis=1)
+        else:
+            self.soft_labels[self.len_label:] = self.prediction[self.len_label:, idx]
 
     def __getitem__(self, idx):
         img, target = self.data[idx], self.targets[idx]
