@@ -72,6 +72,7 @@ def main_worker(local_rank: int, config: object):
 
     if config.for_what=="Proposed":
         setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+        setattr(model,'ova_cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
         setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
     elif config.for_what=='IOMATCH':
         setattr(model,'mlp_proj', nn.Sequential(nn.Linear(model.output.in_features,model.output.in_features),nn.ReLU(),nn.Linear(model.output.in_features,model.output.in_features)))

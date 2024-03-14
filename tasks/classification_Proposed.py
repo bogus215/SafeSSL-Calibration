@@ -13,7 +13,6 @@ from tasks.classification import Classification as Task
 from tasks.classification_OPENMATCH import DistributedSampler
 from utils import TopKAccuracy
 from utils.logging import make_epoch_description
-from skimage.filters import threshold_otsu
 
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
@@ -81,14 +80,13 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            otsu = self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1],current_epoch=epoch)
+            self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1],current_epoch=epoch)
 
             train_history, cls_wise_results = self.train(label_loader=l_loader,
                                                          unlabel_loader=u_loader,
                                                          current_epoch=epoch,
                                                          start_fix=start_fix,
                                                          tau=tau,
-                                                         otsu=otsu,
 
                                                          lambda_cali=lambda_cali,
                                                          lambda_ova_soft=lambda_ova_soft,
@@ -162,7 +160,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, current_epoch, start_fix, tau, otsu, lambda_cali, lambda_ova_soft, lambda_ova_cali, lambda_ova, lambda_fix, smoothing_linear, smoothing_ova, n_bins):
+    def train(self, label_loader, unlabel_loader, current_epoch, start_fix, tau, lambda_cali, lambda_ova_soft, lambda_ova_cali, lambda_ova, lambda_fix, smoothing_linear, smoothing_ova, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(label_loader)
@@ -257,7 +255,7 @@ class Classification(Task):
                             unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_softmax.max(1)
                             
                             ood_score = ((((self.backbone.scaling_logits(weak_ova_logit, name='ova_cali_scaler')).detach()).view(len(unlabel_weak_x),2,-1).softmax(1))[:,0,:] * unlabel_weak_scaled_softmax).sum(1)
-                            used_unlabeled_index = (ood_score < otsu) & (unlabel_confidence > tau)
+                            used_unlabeled_index = (ood_score < 0.5) & (unlabel_confidence > tau)
 
                         if used_unlabeled_index.sum().item() != 0:
                             fix_loss = self.loss_function(strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
@@ -708,8 +706,7 @@ class Classification(Task):
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
-        otsu = threshold_otsu(outlier_score_all.cpu().numpy())
-        select_all = outlier_score_all < otsu
+        select_all = outlier_score_all < 0.5
 
         select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
@@ -720,8 +717,6 @@ class Classification(Task):
 
         # Write TensorBoard summary
         if self.writer is not None:
-            self.writer.add_scalar('Otsu', otsu, global_step=current_epoch)
-
             self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
             self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
             self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
@@ -764,8 +759,6 @@ class Classification(Task):
 
                 self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum(), global_step=current_epoch)
                 self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
-
-        return otsu
                     
     @staticmethod
     def clamp(smoothing_proposed):

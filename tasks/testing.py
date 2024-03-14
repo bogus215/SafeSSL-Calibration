@@ -212,6 +212,7 @@ class Testing(Task):
         result = {
             'top@1': torch.zeros(1, device=self.local_rank),
             'ECE': np.zeros(1),
+            'ECE-ova': np.zeros(1),
             "F1": np.zeros(1),
             "AUROC": np.zeros(1),
             "SEEN-DETECTION-ECE": np.zeros(1),
@@ -270,13 +271,16 @@ class Testing(Task):
         self._set_learning_phase(train=False)
         result = {
             'top@1': torch.zeros(1, device=self.local_rank),
+            'top@1-ova': torch.zeros(1, device=self.local_rank),
             'ECE': np.zeros(1),
+            'ECE-ova': np.zeros(1),
             "F1": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
+            "SEEN-DETECTION-ECE": np.zeros(1),
         }
 
-        labels, logits, out_scores = [], [], []
+        labels, logits, ova_scores, ova_logits = [], [], [], []
 
         with Progress(transient=True, auto_refresh=False) as pg:
 
@@ -292,28 +296,32 @@ class Testing(Task):
                 logit = self.backbone.scaling_logits(logit)
                 probs = nn.functional.softmax(logit, 1)
 
-                ova_logits = self.backbone.ova_classifiers(features).view(features.size(0),2,-1)
-                outlier_score = (ova_logits.softmax(1)[:,0,:] * probs).sum(1)
+                ova_logit = self.backbone.scaling_logits(self.backbone.ova_classifiers(features),name='ova_cali_scaler').view(features.size(0),2,-1)
+                ova_score = (ova_logit.softmax(1)*probs.unsqueeze(1)).sum(-1)
                 
                 labels.append(y.cpu())
                 logits.append(logit.cpu())
-                out_scores.append(outlier_score)
+                ova_scores.append(ova_score.cpu())
+                ova_logits.append(ova_logit.cpu())
                 
                 if self.local_rank == 0:
                     desc = f"[bold pink] [{i+1}/{steps}] |"
                     pg.update(task, advance=1., description=desc)
                     pg.refresh()
 
-        labels, logits, out_scores = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(out_scores,axis=0)
+        labels, logits, ova_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(ova_scores,axis=0), torch.cat(ova_logits,axis=0)
         
-        in_pred = (out_scores < threshold_otsu(out_scores.cpu().numpy())).cpu()
+        in_pred = (ova_scores[:,0] < 0.5).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
 
         result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
+        result['top@1-ova'][0] = TopKAccuracy(k=1)(ova_logits.softmax(dim=1)[labels<logits.size(1),1,:], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
+        result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
         result['F1'][0] = f1_score(y_true=in_label, y_pred=in_pred)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
+        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),n_bins=15)
         
         return {k: v.mean().item() for k, v in result.items()}
 
