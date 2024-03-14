@@ -107,9 +107,6 @@ class Classification(Task):
                 for k, v1 in test_history.items():
                     epoch_history[k]['test'] = v1
 
-                if self.writer is not None:
-                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=((epoch - 1) // 10) + 1)
-
             # Write logs
             log = make_epoch_description(
                 history=epoch_history,
@@ -126,7 +123,7 @@ class Classification(Task):
                 self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1], current_epoch=((epoch - 1) // 10) + 1, threshold=threshold)
 
             # Selection related to unlabeled data
-            threshold = self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1], threshold=threshold, current_epoch=epoch)
+            threshold = self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1], threshold=threshold)
 
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
@@ -176,9 +173,6 @@ class Classification(Task):
                 for k, v1 in test_history.items():
                     epoch_history[k]['test'] = v1
 
-                if self.writer is not None:
-                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=((epoch - 1) // 10) + 1)
-
             # Write logs
             log = make_epoch_description(
                 history=epoch_history,
@@ -189,7 +183,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def exclude_dataset(self,unlabeled_dataset,selected_dataset,threshold, current_epoch):
+    def exclude_dataset(self,unlabeled_dataset,selected_dataset,threshold):
 
         loader = DataLoader(dataset=unlabeled_dataset,
                             batch_size=128,
@@ -230,19 +224,9 @@ class Classification(Task):
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
-        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
-        select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
-        select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
-
         selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
 
         # Write TensorBoard summary
-        if self.writer is not None:
-            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
-            self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
-            self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
-            self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
-
         if len(selected_idx) > 0:
             selected_dataset.set_index(selected_idx)
             
