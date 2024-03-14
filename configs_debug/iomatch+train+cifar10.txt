@@ -1,0 +1,12 @@
+--gpus=0
+--data=cifar10
+--server=main
+--n-label-per-class=400
+--n-valid-per-class=500
+--mismatch-ratio=0.60
+--p-cutoff=0.95
+--q-cutoff=0.50
+--save-every=5000
+--iterations=500000
+--n-bins=15
+--warm-up=1
