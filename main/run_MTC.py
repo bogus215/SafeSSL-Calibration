@@ -129,10 +129,8 @@ def main_worker(local_rank: int, config: object):
     else:
         raise NotImplementedError
     
-    domain_set = MTC_DATASET(data_name=config.data,
-                             dataset={key:np.concatenate([datasets['l_train'][key],datasets['u_train'][key]]) for key in ["images","labels"]},
-                             len_label=len(labeled_set),
-                             transform=train_trans)
+    domain_set = MTC_DATASET(data_name=config.data,dataset={key:np.concatenate([datasets['l_train'][key],datasets['u_train'][key]]) for key in ["images","labels"]},
+                             len_label=len(labeled_set),transform=train_trans)
 
     if local_rank == 0:
         logger.info(f'Data: {config.data}')

@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from rich.progress import Progress
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import Sampler
@@ -62,6 +62,10 @@ class Classification(Task):
 
         threshold = 0.5
         for epoch in range(1, epochs//10 + 1):
+
+            if (epoch-1) % 10 == 0:
+                self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1], current_epoch=((epoch - 1) // 10) + 1, threshold=threshold)
+
             train_history, threshold = self.domain_train(d_loader=domain_loader,l_loader=l_loader, threshold=threshold)
             eval_history = self.evaluate(eval_loader, n_bins)
 
@@ -74,17 +78,24 @@ class Classification(Task):
                 except KeyError:
                     continue
 
-            # Write TensorBoard summary
-            if self.writer is not None:
-                for k, v in epoch_history.items():
-                    for k_, v_ in v.items():
-                        self.writer.add_scalar(f'{k}_{k_}', v_, global_step=epoch)
-                if self.scheduler is not None:
-                    lr = self.scheduler.get_last_lr()[0]
-                    self.writer.add_scalar('lr', lr, global_step=epoch)
+            if (epoch-1) % 10 == 0:
+            
+                # Write TensorBoard summary
+                if self.writer is not None:
+                    for k, v in epoch_history.items():
+                        for k_, v_ in v.items():
+                            self.writer.add_scalar(f'{k}_{k_}', v_, global_step=((epoch - 1) // 10) + 1)
+                    if self.scheduler is not None:
+                        lr = self.scheduler.get_last_lr()[0]
+                        self.writer.add_scalar('lr', lr, global_step=((epoch - 1) // 10) + 1)
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
+
+            if logger is not None and eval_acc==1:
+                logger.info("Eval acc == 1 --> Stop training")
+                break
+
             if eval_acc > best_eval_acc:
                 best_eval_acc = eval_acc
                 best_epoch = epoch
@@ -97,7 +108,7 @@ class Classification(Task):
                     epoch_history[k]['test'] = v1
 
                 if self.writer is not None:
-                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=epoch)
+                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=((epoch - 1) // 10) + 1)
 
             # Write logs
             log = make_epoch_description(
@@ -110,6 +121,9 @@ class Classification(Task):
                 logger.info(log)
 
         for epoch in range(epochs//10 + 1, epochs + 1):
+
+            if (epoch-1) % 10 == 0:
+                self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1], current_epoch=((epoch - 1) // 10) + 1, threshold=threshold)
 
             # Selection related to unlabeled data
             threshold = self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1], threshold=threshold, current_epoch=epoch)
@@ -133,17 +147,24 @@ class Classification(Task):
                 except KeyError:
                     continue
 
-            # Write TensorBoard summary
-            if self.writer is not None:
-                for k, v in epoch_history.items():
-                    for k_, v_ in v.items():
-                        self.writer.add_scalar(f'{k}_{k_}', v_, global_step=epoch)
-                if self.scheduler is not None:
-                    lr = self.scheduler.get_last_lr()[0]
-                    self.writer.add_scalar('lr', lr, global_step=epoch)
+            if (epoch-1) % 10 == 0:
+
+                # Write TensorBoard summary
+                if self.writer is not None:
+                    for k, v in epoch_history.items():
+                        for k_, v_ in v.items():
+                            self.writer.add_scalar(f'{k}_{k_}', v_, global_step=((epoch - 1) // 10) + 1)
+                    if self.scheduler is not None:
+                        lr = self.scheduler.get_last_lr()[0]
+                        self.writer.add_scalar('lr', lr, global_step=((epoch - 1) // 10) + 1)
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
+
+            if logger is not None and eval_acc==1:
+                logger.info("Eval acc == 1 --> Stop training")
+                break
+
             if eval_acc > best_eval_acc:
                 best_eval_acc = eval_acc
                 best_epoch = epoch
@@ -156,7 +177,7 @@ class Classification(Task):
                     epoch_history[k]['test'] = v1
 
                 if self.writer is not None:
-                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=epoch)
+                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=((epoch - 1) // 10) + 1)
 
             # Write logs
             log = make_epoch_description(
@@ -393,6 +414,102 @@ class Classification(Task):
     def get_feature(self, x: torch.FloatTensor):
         """Make a prediction provided a batch of samples."""
         return self.backbone(x, True)
+
+    def logging_unlabeled_dataset(self, unlabeled_dataset, current_epoch, threshold):
+
+        loader = DataLoader(dataset=unlabeled_dataset,
+                            batch_size=128,
+                            drop_last=False,
+                            shuffle=False,
+                            num_workers=4)
+
+        self._set_learning_phase(train=False)
+        
+        with torch.no_grad():
+            with Progress(transient=True, auto_refresh=False) as pg:
+                if self.local_rank == 0:
+                    task = pg.add_task(f"[bold red] Extracting...", total=len(loader))
+                for batch_idx, data in enumerate(loader):
+
+                    x = data['x_ulb_w_0'].cuda(self.local_rank)
+                    y = data['y_ulb'].cuda(self.local_rank)
+
+                    logit, feat = self.get_feature(x)
+                    domain_logit = self.backbone.domain_classifier(feat)
+
+                    score = domain_logit.sigmoid().squeeze()
+
+                    select_idx = score>threshold
+                    gt_idx = y < self.backbone.class_num
+
+                    if batch_idx == 0:
+                        select_all = select_idx
+                        gt_all = gt_idx
+                        score_all = score
+                        logits_all = logit
+                        labels_all = y
+                    else:
+                        select_all = torch.cat([select_all, select_idx], 0)
+                        gt_all = torch.cat([gt_all, gt_idx], 0)
+                        score_all = torch.cat([score_all, score], 0)
+                        logits_all = torch.cat([logits_all, logit], 0)
+                        labels_all = torch.cat([labels_all, y], 0)
+
+                    if self.local_rank == 0:
+                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
+                        pg.update(task, advance=1., description=desc)
+                        pg.refresh()
+
+        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
+        select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_f1 = f1_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+
+        selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
+
+        probs_all = logits_all.softmax(-1)
+        
+        # Write TensorBoard summary
+        if self.writer is not None:
+            self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
+            self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
+            self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('Selected f1', select_f1, global_step=current_epoch)
+            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
+
+            self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+
+            if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d over conf 0.95', ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum() / gt_all.sum() , global_step=current_epoch)
+
+            if ((gt_all) & (select_all)).sum()>0:
+                self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d under ood score 0.5', ((gt_all) & (select_all)).sum() / gt_all.sum() , global_step=current_epoch)
+
+            if (probs_all.max(1)[0]>=0.95).sum()>0:
+                self.writer.add_scalar('Seen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum(), global_step=current_epoch)
+                
+            if select_all.sum()>0:
+                self.writer.add_scalar('Seen-class ratio under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum(), global_step=current_epoch)
+
+            if ((select_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('Seen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
 
 def mixmatch_loss(outputs_x, targets_x, outputs_u, targets_u):
 
