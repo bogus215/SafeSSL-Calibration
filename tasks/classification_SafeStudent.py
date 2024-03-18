@@ -6,6 +6,7 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import Sampler
+from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 from tasks.classification import Classification as Task
 from utils import TopKAccuracy
@@ -26,6 +27,7 @@ class Classification(Task):
             lambda_two,
             ema_factor,
             ema_update, 
+            pretrain_train_split,
             n_bins,
             **kwargs):  # pylint: disable=unused-argument
         num_workers = self.num_workers
@@ -49,15 +51,17 @@ class Classification(Task):
 
         # Logging
         logger = kwargs.get('logger', None)
-        enable_plot = kwargs.get('enable_plot',False)
 
         # Supervised training
         best_eval_acc = -float('inf')
         best_epoch    = 0
 
         """Teacher Pretraining"""
-        for epoch in range(1, epochs//2 + 1):
+        for epoch in range(1, epochs//pretrain_train_split + 1):
             
+            # training unlabeled data logging
+            self.log_unlabeled_data(unlabel_dataset=train_set[1],current_epoch=epoch, T=T, tau=tau)
+
             train_history = self.pretrain(l_loader, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
 
@@ -81,6 +85,10 @@ class Classification(Task):
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
+            if logger is not None and eval_acc==1:
+                logger.info("Eval acc == 1 --> Stop training")
+                break
+
             if eval_acc > best_eval_acc:
                 best_eval_acc = eval_acc
                 best_epoch = epoch
@@ -113,7 +121,11 @@ class Classification(Task):
         self.teacher.eval()
 
         """Student Training: Iterative Optimization"""
-        for epoch in range(epochs//2 + 1, epochs + 1):
+        for epoch in range(epochs//pretrain_train_split + 1, epochs + 1):
+
+            # training unlabeled data logging
+            self.log_unlabeled_data(unlabel_dataset=train_set[1],current_epoch=epoch)
+
             train_history = self.sst_train(l_loader, unlabel_loader,n_bins=n_bins,tau=tau,T=T,lambda_one=lambda_one,lambda_two=lambda_two)
             eval_history = self.evaluate(eval_loader, n_bins)
 
@@ -142,6 +154,10 @@ class Classification(Task):
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
+            if logger is not None and eval_acc==1:
+                logger.info("Eval acc == 1 --> Stop training")
+                break
+
             if eval_acc > best_eval_acc:
                 best_eval_acc = eval_acc
                 best_epoch = epoch
@@ -165,6 +181,102 @@ class Classification(Task):
             )
             if logger is not None:
                 logger.info(log)
+
+    @torch.no_grad()
+    def log_unlabeled_data(self,unlabel_dataset,current_epoch, T, tau):
+
+        loader = DataLoader(dataset=unlabel_dataset,
+                            batch_size=128,
+                            drop_last=False,
+                            shuffle=False,
+                            num_workers=4)
+
+        self._set_learning_phase(train=False)
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Extracting...", total=len(loader))
+            for batch_idx, data in enumerate(loader):
+
+                x = data['x_ulb_w'].cuda(self.local_rank)
+                y = data['unlabel_y'].cuda(self.local_rank)
+
+                unlabel_weak_logit = self.predict(x)
+
+                """Seen and Unseen Classes Identiifcation"""
+                ed_value = self.ed(unlabel_weak_logit, t=T)    # Collect ED for unlabeled samples by teacher and Eq. (4)
+
+                gt_idx = y < self.backbone.class_num
+
+                if batch_idx == 0:
+                    gt_all = gt_idx
+                    logits_all = unlabel_weak_logit
+                    labels_all = y
+                    ed_values = ed_value
+                else:
+                    gt_all = torch.cat([gt_all, gt_idx], 0)
+                    logits_all = torch.cat([logits_all, unlabel_weak_logit], 0)
+                    labels_all = torch.cat([labels_all, y], 0)
+                    ed_values = torch.cat([ed_values, ed_value], 0)
+                    
+                if self.local_rank == 0:
+                    desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        select_all = ed_values > tau
+
+        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
+        select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_f1 = f1_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+
+        selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
+
+        probs_all = logits_all.softmax(-1)
+        
+        # Write TensorBoard summary
+        if self.writer is not None:
+            self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
+            self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
+            self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('Selected f1', select_f1, global_step=current_epoch)
+            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
+
+            self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+
+            if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d over conf 0.95', ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum() / gt_all.sum() , global_step=current_epoch)
+
+            if ((gt_all) & (select_all)).sum()>0:
+                self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d under ood score 0.5', ((gt_all) & (select_all)).sum() / gt_all.sum() , global_step=current_epoch)
+
+            if (probs_all.max(1)[0]>=0.95).sum()>0:
+                self.writer.add_scalar('Seen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum(), global_step=current_epoch)
+                
+            if select_all.sum()>0:
+                self.writer.add_scalar('Seen-class ratio under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum(), global_step=current_epoch)
+
+            if ((select_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('Seen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
+
 
     def pretrain(self, label_loader, n_bins):
         """Training defined for a single epoch."""

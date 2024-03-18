@@ -468,6 +468,7 @@ class SafeStudentConfig(ConfigBase):
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
         parser.add_argument('--ema-factor', type=float, default=0.996)
         parser.add_argument('--ema-update', action="store", type=int , nargs='*',default=[60,70,80], help='learning rate decay milestones')
+        parser.add_argument('--pretrain-train-split', type=int, default=2 , help='')
 
         return parser
 
