@@ -15,7 +15,8 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v7
+                                    --lambda-ova-cali 0.5 --lambda-ova 0.5 \
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v20
 
         echo PROPOSED+CIFAR10, ${CIFAR10_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
@@ -25,7 +26,8 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v7
+                                    --lambda-ova-cali 0.1 --lambda-ova 0.1 \
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v20
 
         echo PROPOSED+TINY, ${TINY_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
@@ -35,7 +37,8 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v7
+                                    --lambda-ova-cali 0.5 --lambda-ova 0.5 \
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v20
 
         python ./main/run_PROPOSED.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
                                     --data svhn --server main --enable-wandb \
@@ -43,6 +46,7 @@ do
                                     --mismatch-ratio $ratio --mixed-precision \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --weight-decay 0 --wandb-proj-v=-v7
+                                    --lambda-ova-cali 0.5 --lambda-ova 0.5 \
+                                    --weight-decay 0 --wandb-proj-v=-v20
     done
 done
