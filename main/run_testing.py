@@ -80,6 +80,8 @@ def main_worker(local_rank: int, config: object):
         setattr(model,'openset_classifier', nn.Linear(model.output.in_features,int(model.class_num+1)))
     elif config.for_what=='OPENMATCH':
         setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
+    elif config.for_what=='MTC':
+        setattr(model,'domain_classifier', nn.Linear(model.output.in_features, 1))
     else:
         pass
 

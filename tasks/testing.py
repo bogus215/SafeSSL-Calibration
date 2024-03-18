@@ -90,6 +90,8 @@ class Testing(Task):
             eval_history = self.openmatch_evaluate(open_test_loader)
         elif for_what in ["FIXMATCH","SL"]:
             eval_history = self.fixmatch_evaluate(open_test_loader)
+        elif for_what=="MTC":
+            eval_history = self.mtc_evaluate(open_test_loader)
         else:
             pass
 
@@ -100,6 +102,61 @@ class Testing(Task):
         if logger is not None:
             logger.info(log)
 
+    @torch.no_grad()
+    def mtc_evaluate(self, data_loader, **kwargs):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+        result = {
+            'top@1': torch.zeros(1, device=self.local_rank),
+            'ECE': np.zeros(1),
+            "F1": np.zeros(1),
+            'In distribution over conf 0.95: ECE': np.zeros(1),
+            'In distribution under ood score 0.5: ECE': np.zeros(1)
+        }
+
+        labels, logits, domain_score = [], [], []
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Data Testing...", total=steps)
+
+            for i, batch in enumerate(data_loader):
+
+                x = batch['x'].to(self.local_rank)
+                y = batch['y'].to(self.local_rank)
+
+                logit, feat = self.backbone(x, return_feature=True)
+                logits_domain = self.backbone.domain_classifier(feat)
+
+                score = logits_domain.sigmoid().squeeze()
+
+                labels.append(y.cpu())
+                logits.append(logit.cpu())
+                domain_score.append(score.cpu())
+
+                if self.local_rank == 0:
+                    desc = f"[bold pink] [{i+1}/{steps}] |"
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        labels, logits, domain_score = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(domain_score, axis=0)
+
+        threshold = threshold_otsu(domain_score.cpu().numpy())
+    
+        in_pred = (domain_score >= threshold).cpu()
+        in_label = torch.where(labels<logits.size(1),1,0)
+
+        result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
+        result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
+        result['F1'][0] = f1_score(y_true=in_label, y_pred=in_pred)
+        result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
+        result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
+
+        return {k: v.mean().item() for k, v in result.items()}
+    
     @torch.no_grad()
     def iomatch_evaluate(self, data_loader, **kwargs):
         """Evaluation defined for a single epoch."""
