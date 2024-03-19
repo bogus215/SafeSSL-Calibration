@@ -13,7 +13,7 @@ do
                                     --n-label-per-class 400 \
                                     --n-valid-per-class 500 \
                                     --mismatch-ratio $ratio --mixed-precision \
-                                    --save-every 5000 --learning-rate 3e-3 \
+                                    --save-every 500 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam 
 
         echo FIXMATCH+CIFAR100, ${CIFAR100_SEEDS[$seed]}, $ratio
@@ -22,7 +22,7 @@ do
                                     --n-label-per-class 100 \
                                     --n-valid-per-class 50 \
                                     --mismatch-ratio $ratio --mixed-precision \
-                                    --save-every 5000 --learning-rate 3e-3 \
+                                    --save-every 500 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam 
 
         echo FIXMATCH+TINY, ${TINY_SEEDS[$seed]}, $ratio
@@ -31,7 +31,7 @@ do
                                     --n-label-per-class 100 \
                                     --n-valid-per-class 50 \
                                     --mismatch-ratio $ratio --mixed-precision \
-                                    --save-every 5000 --learning-rate 3e-3 \
+                                    --save-every 500 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam 
 
         echo FIXMATCH+SVHN, ${SVHN_SEEDS[$seed]}, $ratio
@@ -39,7 +39,7 @@ do
                                     --data svhn --server main --enable-wandb \
                                     --n-label-per-class 50 \
                                     --mismatch-ratio $ratio --mixed-precision \
-                                    --save-every 5000 --learning-rate 3e-3 \
+                                    --save-every 500 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam 
     done
 done
