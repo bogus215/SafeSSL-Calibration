@@ -123,7 +123,7 @@ class Classification(Task):
         for epoch in range(epochs//pretrain_train_split + 1, epochs + 1):
 
             # training unlabeled data logging
-            self.log_unlabeled_data(unlabel_dataset=train_set[1],current_epoch=epoch)
+            self.log_unlabeled_data(unlabel_dataset=train_set[1],current_epoch=epoch, T=T, tau=tau)
 
             train_history = self.sst_train(l_loader, unlabel_loader,n_bins=n_bins,tau=tau,T=T,lambda_one=lambda_one,lambda_two=lambda_two)
             eval_history = self.evaluate(eval_loader, n_bins)
