@@ -316,6 +316,7 @@ class IOMATCHConfig(ConfigBase):
         parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--p-cutoff', type=float, default=0.95)
         parser.add_argument('--q-cutoff', type=float, default=0.50)
+        parser.add_argument('--lambda-open', type=float, default=1)
         parser.add_argument('--dist-da-len', type=int, default=128)
 
         return parser

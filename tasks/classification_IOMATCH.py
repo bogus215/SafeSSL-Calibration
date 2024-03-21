@@ -29,6 +29,7 @@ class Classification(Task):
             warm_up_end,
             n_bins,
             dist_da_len,
+            lambda_open,
             **kwargs):  # pylint: disable=unused-argument
 
         batch_size = self.batch_size
@@ -74,7 +75,7 @@ class Classification(Task):
             self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1],current_epoch=epoch)
             
             # Train & evaluate
-            train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, p_cutoff=p_cutoff, q_cutoff=q_cutoff, n_bins=n_bins)
+            train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, p_cutoff=p_cutoff, q_cutoff=q_cutoff, n_bins=n_bins, lambda_open=lambda_open)
             eval_history = self.evaluate(eval_loader, n_bins)
             try:
                 if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
@@ -135,7 +136,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_iterator, unlabel_iterator, iteration, p_cutoff, q_cutoff, n_bins):
+    def train(self, label_iterator, unlabel_iterator, iteration, p_cutoff, q_cutoff, n_bins, lambda_open):
         """Training defined for a single epoch."""
 
         self._set_learning_phase(train=True)
@@ -214,7 +215,7 @@ class Classification(Task):
                     op_loss = (torch.sum(logits_open_x_ulb_s.log_softmax(-1) * (-targets_q), dim=1) * (q_mask)).mean()
 
                     warm_up_coef = math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
-                    loss = sup_loss + warm_up_coef*(unsup_loss+op_loss)
+                    loss = sup_loss + warm_up_coef*(unsup_loss+op_loss*lambda_open)
 
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward()
