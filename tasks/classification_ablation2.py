@@ -1,5 +1,4 @@
 import collections
-import math
 import os
 
 import numpy as np
@@ -8,13 +7,13 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 from tasks.classification import Classification as Task
 from tasks.classification_OPENMATCH import DistributedSampler
-
 from utils import TopKAccuracy
 from utils.logging import make_epoch_description
+
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 plt.style.use('bmh')
@@ -29,13 +28,19 @@ class Classification(Task):
             eval_set,
             test_set,
             open_test_set,
+
             save_every,
             tau,
-            tau_two,
-            start_fix,
-            start_select,
-            lambda_em,
+
+            lambda_cali,
+            lambda_ova_soft,
+            lambda_ova,
+            lambda_fix,
+
+            start_fix: int =5,
+
             n_bins: int = 15,
+            train_n_bins: int = 30,
             **kwargs):  # pylint: disable=unused-argument
 
         num_workers = self.num_workers
@@ -65,22 +70,28 @@ class Classification(Task):
         best_epoch    = 0
 
         self.trained_iteration = 0
-
+        
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_select,current_epoch=epoch)
+            self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1],current_epoch=epoch)
 
-            # Train & evaluate
-            u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
-            selected_u_loader = DataLoader(train_set[-1], sampler=u_sel_sampler,batch_size=self.batch_size//2,num_workers=num_workers,drop_last=False,pin_memory=False,shuffle=False)
+            train_history, cls_wise_results = self.train(label_loader=l_loader,
+                                                         unlabel_loader=u_loader,
+                                                         current_epoch=epoch,
+                                                         start_fix=start_fix,
+                                                         tau=tau,
 
-            # Train & evaluate
-            train_history, cls_wise_results = self.train(l_loader,u_loader,selected_u_loader,
-                                                         tau=tau,tau_two=tau_two,lambda_em=lambda_em,
-                                                         current_epoch=epoch, start_fix=start_fix,
+                                                         lambda_cali=lambda_cali,
+                                                         lambda_ova_soft=lambda_ova_soft,
+                                                         lambda_ova=lambda_ova,
+                                                         lambda_fix=lambda_fix,
+
+                                                         smoothing_linear=None if epoch==1 else ece_linear_results,
+
                                                          n_bins=n_bins)
-            eval_history = self.evaluate(eval_loader, n_bins=n_bins)
+
+            eval_history, ece_linear_results, ece_ova_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
 
             epoch_history = collections.defaultdict(dict)
             for k, v1 in train_history.items():
@@ -105,6 +116,11 @@ class Classification(Task):
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
+
+            if logger is not None and eval_acc==1:
+                logger.info("Eval acc == 1 --> Stop training")
+                break
+
             if eval_acc > best_eval_acc:
                 best_eval_acc = eval_acc
                 best_epoch = epoch
@@ -112,12 +128,12 @@ class Classification(Task):
                     ckpt = os.path.join(self.ckpt_dir, "ckpt.best.pth.tar")
                     self.save_checkpoint(ckpt, epoch=epoch)
 
-                test_history = self.evaluate(test_loader, n_bins=n_bins)
-                for k, v1 in test_history.items():
+                test_history = self.evaluate(test_loader, n_bins=n_bins, train_n_bins=train_n_bins)
+                for k, v1 in test_history[0].items():
                     epoch_history[k]['test'] = v1
 
                 if self.writer is not None:
-                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=epoch)
+                    self.writer.add_scalar('Best_Test_top@1', test_history[0]['top@1'], global_step=epoch)
 
             # Write logs
             log = make_epoch_description(
@@ -129,20 +145,29 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, selected_unlabel_loader, current_epoch, start_fix, tau, tau_two, lambda_em, n_bins):
+    def train(self, label_loader, unlabel_loader, current_epoch, start_fix, tau, lambda_cali, lambda_ova_soft, lambda_ova, lambda_fix, smoothing_linear, n_bins):
         """Training defined for a single epoch."""
 
-        iteration = len(selected_unlabel_loader)
+        iteration = len(label_loader)
 
         self._set_learning_phase(train=True)
         result = {
             'loss': torch.zeros(iteration, device=self.local_rank),
+
+            'label_sup': torch.zeros(iteration, device=self.local_rank),
+            'label_cali': torch.zeros(iteration, device=self.local_rank),
+            'label_ova': torch.zeros(iteration, device=self.local_rank),
+
+            'unlabel_fix': torch.zeros(iteration, device=self.local_rank),
+            'unlabel_ova_socr': torch.zeros(iteration, device=self.local_rank),
+
             'top@1': torch.zeros(iteration, device=self.local_rank),
+            'ova-top@1': torch.zeros(iteration, device=self.local_rank),
             'ece': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
-            'l_ul_cls_loss' : torch.zeros(iteration, device=self.local_rank)            
+            "cali_temp": torch.zeros(iteration, device=self.local_rank),
         }
         
         if self.backbone.class_num==6:
@@ -150,57 +175,66 @@ class Classification(Task):
         elif self.backbone.class_num==50:
             cls_wise_results = {i:torch.zeros(iteration) for i in range(100)}
         else:
-            cls_wise_results = {i:torch.zeros(iteration) for i in range(200)}         
+            cls_wise_results = {i:torch.zeros(iteration) for i in range(200)}        
 
         with Progress(transient=True, auto_refresh=False) as pg:
 
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Training...", total=iteration)
 
-            for i, (data_lb, data_ulb, data_ulb_selected) in enumerate(zip(label_loader, unlabel_loader, selected_unlabel_loader)):
+            for i, (data_lb, data_ulb) in enumerate(zip(label_loader, unlabel_loader)):
                 with torch.cuda.amp.autocast(self.mixed_precision):
 
                     label_x = data_lb['x_lb'].to(self.local_rank)
                     label_y = data_lb['y_lb'].to(self.local_rank)
 
                     unlabel_weak_x = data_ulb['x_ulb_w'].to(self.local_rank)
-                    unlabel_strong_x = data_ulb["x_ulb_s"].to(self.local_rank)
+                    unlabel_weak_t_x = data_ulb['x_ulb_w_t'].to(self.local_rank)
+                    unlabel_y = data_ulb['y_ulb'].to(self.local_rank)
+                    x_ulb_s = data_ulb["x_ulb_s"].to(self.local_rank)
 
-                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_strong_x],axis=0))
-                    label_logit, u_weak_logit, _ = full_logits.split(label_y.size(0))
+                    full_logits, full_features = self.get_feature(torch.cat([label_x, unlabel_weak_x, unlabel_weak_t_x, x_ulb_s],axis=0))
+                    label_logit, weak_logit, _, strong_logit = full_logits.chunk(4)
 
-                    label_loss = self.loss_function(label_logit, label_y.long())
-                    unlabel_loss = torch.zeros(1).to(self.local_rank)
-                    
-                    with torch.no_grad():
-                        u_data_similar_idx_to_label = u_weak_logit.softmax(1).max(1)[0]<=tau_two
-                        select_idx = torch.cat((torch.ones_like(label_y.long()).bool(),u_data_similar_idx_to_label.repeat(2)))
-                        ul_labels = torch.ones_like(label_y.long())
-                        l_ul_labels = torch.cat((torch.zeros_like(label_y.long()),ul_labels.repeat(2)))
-                        
-                    l_ul_cls_loss = self.cross_H_loss_func(self.backbone.mlp(full_features)[select_idx],
-                                                           l_ul_labels[select_idx],
-                                                           lambda_em) + self.backbone.mlp.l2_norm_loss()
+                    ova_full_logits = self.backbone.ova_classifiers(full_features)
+                    label_ova_logit, weak_ova_logit, weak_ova_t_logit, _ = ova_full_logits.chunk(4)
+
+                    label_sup_loss = self.loss_function(label_logit, label_y)
+
+                    label_ova_loss = ova_loss_func(label_ova_logit,label_y)
+                    ova_soft_loss = socr_loss_func(weak_ova_logit, weak_ova_t_logit)
+
+                    cali_loss = torch.tensor(0).cuda(self.local_rank)
+
+                    if smoothing_linear is not None:
+
+                        smoothing_proposed_surgery = self.clamp(smoothing_linear)
+
+                        labeled_confidence = label_logit.softmax(dim=-1).max(1)[0].detach()
+                        label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery)
+
+                        for_one_hot_label = nn.functional.one_hot(label_y,num_classes=self.backbone.output.out_features)
+                        for_smoothoed_target_label = (label_confidence_surgery.view(-1,1)*(for_one_hot_label==1) + ((1-label_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_label!=1))
+
+                        cali_loss = (-torch.mean(torch.sum(torch.log(self.backbone.scaling_logits(label_logit).softmax(1)+1e-5)*for_smoothoed_target_label,axis=1)))
+
+                    fix_loss = torch.tensor(0).cuda(self.local_rank)
 
                     if current_epoch >= start_fix:
 
-                        x_ulb_w = data_ulb_selected["x_ulb_w"].to(self.local_rank)
-                        x_ulb_s = data_ulb_selected["x_ulb_s"].to(self.local_rank)
-
-                        unlabel_y = data_ulb_selected["unlabel_y"].to(self.local_rank)
-
-                        inputs_selected = torch.cat((x_ulb_w, x_ulb_s), 0)
-                        selected_logits = self.backbone(inputs_selected)
-
-                        unlabel_weak_logit, unlabel_strong_logit = selected_logits.split(x_ulb_s.size(0))                        
-                        unlabel_confidence, unlabel_pseudo_y = unlabel_weak_logit.softmax(1).max(1)
-                        used_unlabeled_index = unlabel_confidence>tau
+                        with torch.no_grad():
+                            unlabel_weak_scaled_logit = self.backbone.scaling_logits(weak_logit)
+                            unlabel_weak_scaled_softmax = unlabel_weak_scaled_logit.softmax(1)
+                            unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_softmax.max(1)
+                            
+                            ood_score = (((weak_ova_logit.detach()).view(len(unlabel_weak_x),2,-1).softmax(1))[:,0,:] * unlabel_weak_scaled_softmax).sum(1)
+                            used_unlabeled_index = (ood_score < 0.5) & (unlabel_confidence > tau)
 
                         if used_unlabeled_index.sum().item() != 0:
-                            unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
-                
-                    loss = label_loss + unlabel_loss + l_ul_cls_loss
+                            fix_loss = self.loss_function(strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
                   
+                    loss = label_sup_loss + lambda_cali*cali_loss + lambda_ova*label_ova_loss + lambda_ova_soft*ova_soft_loss +lambda_fix*fix_loss
+
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.optimizer)
@@ -213,14 +247,23 @@ class Classification(Task):
                 self.trained_iteration+=1
                 
                 result['loss'][i] = loss.detach()
+
+                result['label_sup'][i] = label_sup_loss.detach()
+                result['label_cali'][i] = cali_loss.detach()
+                result['label_ova'][i] = label_ova_loss.detach()
+
+                result['unlabel_ova_socr'][i] = ova_soft_loss.detach()
+                result['unlabel_fix'][i] = fix_loss.detach()
+
                 result['top@1'][i] = TopKAccuracy(k=1)(label_logit, label_y).detach()
-                result['ece'][i] = self.get_ece(preds=label_logit.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
-                result['l_ul_cls_loss'][i] = l_ul_cls_loss.detach()
+                result['ova-top@1'][i] = TopKAccuracy(k=1)(label_ova_logit.view(len(label_y),2,-1).softmax(1)[:,1,:], label_y).detach()
+                result['ece'][i] = self.get_ece(preds=self.backbone.scaling_logits(label_logit).softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                result["cali_temp"][i] = self.backbone.cali_scaler.item()
 
                 if current_epoch>=start_fix:
                     if used_unlabeled_index.sum().item()!=0:
-                        result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(unlabel_weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
-                        result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
+                        result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(weak_logit[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
+                        result['unlabeled_ece'][i] = self.get_ece(preds=unlabel_weak_scaled_logit[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
                                                                   targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                     result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
 
@@ -246,7 +289,7 @@ class Classification(Task):
         return {k: v.mean().item() for k, v in result.items()}, cls_wise_results
 
     @torch.no_grad()
-    def evaluate(self, data_loader, n_bins, **kwargs):
+    def evaluate(self, data_loader, n_bins, train_n_bins, **kwargs):
         """Evaluation defined for a single epoch."""
 
         steps = len(data_loader)
@@ -254,34 +297,34 @@ class Classification(Task):
         result = {
             'loss': torch.zeros(steps, device=self.local_rank),
             'top@1': torch.zeros(1, device=self.local_rank),
+            'ova-top@1': torch.zeros(1, device=self.local_rank),
             'ece': torch.zeros(1, device=self.local_rank)
         }
-
-        swa_on = kwargs.get('swa_on',False)
-        swa_start = kwargs.get('swa_start',100000)
 
         with Progress(transient=True, auto_refresh=False) as pg:
 
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Evaluating...", total=steps)
 
-            pred,true,IDX=[],[],[]
+            pred,true,ova_pred,IDX=[],[],[],[]
             for i, batch in enumerate(data_loader):
 
                 x = batch['x'].to(self.local_rank)
                 y = batch['y'].to(self.local_rank)
                 idx = batch['idx'].to(self.local_rank)
 
-                if swa_on and self.trained_iteration>=swa_start:
-                    logits = self.swa_model(x)
-                else:
-                    logits = self.predict(x)
-                    
+                logits, features = self.get_feature(x)
+                logits = self.backbone.scaling_logits(logits)
+
                 loss = self.loss_function(logits, y.long())
+
+                ova_logits = ((self.backbone.ova_classifiers(features))).view(features.size(0),2,-1)
+                ova_logits = ova_logits.softmax(1)[:,1,:]
 
                 result['loss'][i] = loss
                 true.append(y.cpu())
                 pred.append(logits.cpu())
+                ova_pred.append(ova_logits.cpu())
                 IDX += [idx]
                 
                 if self.local_rank == 0:
@@ -290,13 +333,17 @@ class Classification(Task):
                     pg.refresh()
 
         # preds, pred are logit vectors
-        preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
+        preds, trues, ova_preds = torch.cat(pred,axis=0), torch.cat(true,axis=0), torch.cat(ova_pred)
         result['top@1'][0] = TopKAccuracy(k=1)(preds, trues)
+        result['ova-top@1'][0] = TopKAccuracy(k=1)(ova_preds, trues)
 
         ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=n_bins, plot=False)
         result['ece'][0] = ece_results[0]
 
-        return {k: v.mean().item() for k, v in result.items()}
+        train_ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
+        train_ece_results_ova = self.get_ece(preds=ova_preds.numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
+        
+        return {k: v.mean().item() for k, v in result.items()}, train_ece_results[1], train_ece_results_ova[1]
 
     @staticmethod
     def get_ece(preds: np.array, targets: np.array, n_bins: int=15, **kwargs):
@@ -335,255 +382,8 @@ class Classification(Task):
                 y_ticks_second_ticks.append(None)
 
         return ece, {tick:accuracy for tick, accuracy in zip(bin_boundaries.round(2)[:-1], acc_ticks)}
-    
-    @torch.no_grad()
-    def log_plot_history(self, data_loader, time, name, **kwargs):
-        """Evaluation defined for a single epoch."""
-
-        steps = len(data_loader)
-        self._set_learning_phase(train=False)
-
-        return_results = kwargs.get("return_results",False)
-        get_results = kwargs.get("get_results",None)
-
-        with Progress(transient=True, auto_refresh=False) as pg:
-
-            if self.local_rank == 0:
-                task = pg.add_task(f"[bold red] Plotting...", total=steps)
-
-            pred,true,IDX,FEATURE, CLS_LOSSES =[],[],[],[],[]
-            for i, batch in enumerate(data_loader):
-
-                try:
-                    x = batch['x'].to(self.local_rank)
-                except:
-                    x = batch['weak_img'].to(self.local_rank)
-                y = batch['y'].to(self.local_rank)
-                idx = batch['idx'].to(self.local_rank)
-
-                logits, feature = self.get_feature(x)
-                logits = self.backbone.scaling_logits(logits)
-                true.append(y.cpu())
-                pred.append(logits.cpu())
-                FEATURE.append(feature.squeeze().cpu())
-                IDX += [idx]
-
-                if name == 'unlabel':
-                    cls_losses = -(self.backbone.mlp(feature.squeeze()).log_softmax(1) * torch.nn.functional.one_hot(torch.ones_like(y), 2)).sum(1)
-                    CLS_LOSSES.append(cls_losses)
-                elif name == 'label':
-                    cls_losses = -(self.backbone.mlp(feature.squeeze()).log_softmax(1) * torch.nn.functional.one_hot(torch.zeros_like(y), 2)).sum(1)
-                    CLS_LOSSES.append(cls_losses)
-                else:
-                    pass
-
-                if self.local_rank == 0:
-                    desc = f"[bold green] [{i+1}/{steps}]: Having feature vector..."
-                    pg.update(task, advance=1., description=desc)
-                    pg.refresh()
-
-        # preds, pred are logit vectors
-        preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
-        FEATURE = torch.cat(FEATURE)
-        IDX = torch.cat(IDX)
-        if name in ['label','unlabel']:
-            CLS_LOSSES = torch.cat(CLS_LOSSES)
-            CLS_LOSS_IN = CLS_LOSSES[trues<self.backbone.class_num]
-            CLS_LOSS_OOD = CLS_LOSSES[trues>=self.backbone.class_num]
-            
-        if get_results is not None:
-            
-            # get_results=[label_preds, label_trues, label_FEATURE, label_CLS_LOSS]
-            
-            labels_unlabels = torch.cat([torch.ones_like(get_results[1]),torch.zeros_like(trues)])
-            preds = torch.cat([get_results[0], preds],axis=0)
-            trues = torch.cat([get_results[1],trues],axis=0)
-            FEATURE = torch.cat([get_results[2], FEATURE],axis=0)
-            CLS_LOSSES = torch.cat([get_results[3],CLS_LOSSES],axis=0)
-        snd_feature = TSNE(learning_rate=20).fit_transform(FEATURE)
-        colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple']
-
-        if len(trues.unique()) != preds.shape[1]:
-            plt.figure(figsize=(24, 24))
-            plt.subplot(2, 2, 1)
-            if get_results is not None:
-                for c in trues.unique()[:preds.shape[1]]:
-                    plt.scatter(snd_feature[(labels_unlabels == 1) & (trues==c),0], snd_feature[(labels_unlabels == 1) & (trues==c),1],label=f"{c.item()}-label",c=colors[c], marker="o")
-                    plt.scatter(snd_feature[(labels_unlabels == 0) & (trues==c),0], snd_feature[(labels_unlabels == 0) & (trues==c),1],label=f"{c.item()}-unlabel",c=colors[c], marker="*")
-            else:
-                for c in trues.unique()[:preds.shape[1]]:
-                    plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
-            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4)
-            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-            plt.title('Via true labels - IN')
-
-            plt.subplot(2, 2, 2)
-            for c in trues.unique()[preds.shape[1]:]:
-                plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
-            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4)
-            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-            plt.title('Via true labels - OOD')
-
-            plt.subplot(2, 2, 3)
-            if get_results is not None:
-                for idx,c in enumerate(range(preds.shape[1])):
-                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),0],
-                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),1],
-                                label=f"{c}-label",c=colors[idx], marker='o')
-
-                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),0],
-                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),1],
-                                label=f"{c}-unlabel",c=colors[idx], marker='*')
-            else:
-                for idx,c in enumerate(range(preds.shape[1])):
-                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
-                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
-                                label=c,c=colors[idx])
-
-            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4)
-            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-            plt.title('Via predicted label - IN(but, this is true)')
-
-            plt.subplot(2, 2, 4)
-            for idx,c in enumerate(range(preds.shape[1])):
-                plt.scatter(snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),0],
-                            snd_feature[(trues>=preds.shape[1]) & (preds.argmax(1)==c),1],
-                            label=c,c=colors[idx])
-
-            plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4)
-            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-            plt.title('Via predicted label - OOD(but, this is true)')
-
-            plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}.png"))
-            plt.close('all')
-            
-            if get_results is not None:
-                plt.scatter(snd_feature[(labels_unlabels == 0) & (trues>=preds.shape[1]),0], snd_feature[(labels_unlabels == 0) & (trues>=preds.shape[1]),1],label="unlabel-ood",c='black', marker="*",s=5,alpha=.5)
-                plt.scatter(snd_feature[(labels_unlabels == 0) & (trues<preds.shape[1]),0], snd_feature[(labels_unlabels == 0) & (trues<preds.shape[1]),1],label="unlabel-In",c='blue', marker="*",s=5,alpha=.5)
-                plt.scatter(snd_feature[(labels_unlabels == 1),0], snd_feature[(labels_unlabels == 1),1],label="label",c='red', marker="o",s=5,alpha=.5)
-                plt.legend()
-                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-                plt.title('Label or Unlabel')
-                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=label-or-unlabel.png"))
-                plt.close('all')
-
-                plt.scatter(snd_feature[(labels_unlabels == 1),0], snd_feature[(labels_unlabels == 1),1],
-                            c=CLS_LOSSES[labels_unlabels==1].cpu().numpy(),
-                            marker="o",s=5,
-                            cmap='viridis',
-                            alpha=.5)
-                plt.colorbar()
-                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-                plt.title('Label Feature with cls loss')
-                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-label-with-cls-loss.png"))
-                plt.close('all')
-
-                plt.scatter(snd_feature[(labels_unlabels==0),0], snd_feature[(labels_unlabels==0),1],
-                            c=CLS_LOSSES[labels_unlabels==0].cpu().numpy(),
-                            marker="o",s=5,
-                            cmap='viridis',
-                            alpha=.5)
-                plt.colorbar()
-                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-                plt.title('Unlabel Feature with cls loss')
-                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-unlabel-with-cls-loss.png"))
-                plt.close('all')
-
-                plt.scatter(snd_feature[(labels_unlabels == 1),0], snd_feature[(labels_unlabels == 1),1],
-                            c=preds.softmax(1).max(1)[0][labels_unlabels==1].cpu().numpy(),
-                            marker="o",s=5,
-                            cmap='viridis',
-                            alpha=.5)
-                plt.colorbar()
-                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-                plt.title('Label Feature with conf')
-                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-label-with-conf.png"))
-                plt.close('all')
-
-                plt.scatter(snd_feature[(labels_unlabels==0),0], snd_feature[(labels_unlabels==0),1],
-                            c=preds.softmax(1).max(1)[0][labels_unlabels==0].cpu().numpy(),
-                            marker="o",s=5,
-                            cmap='viridis',
-                            alpha=.5)
-                plt.colorbar()
-                plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-                plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-                plt.title('Unlabel Feature with conf')
-                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-unlabel-with-conf.png"))
-                plt.close('all')
-                
-                sns.jointplot(x=preds.softmax(1).max(1)[0][labels_unlabels==0].cpu().numpy(), y=CLS_LOSSES[labels_unlabels==0].cpu().numpy(), marginal_kws=dict(bins=25, fill=False))
-                plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type=only-label-with-conf-cls-loss.png"))
-                plt.close('all')
-                
-        else:
-            plt.figure(figsize=(12, 6))
-            plt.subplot(1, 2, 1)
-            if get_results is not None:
-                for c in trues.unique()[:preds.shape[1]]:
-                    plt.scatter(snd_feature[(labels_unlabels == 1) & (trues==c),0], snd_feature[(labels_unlabels == 1) & (trues==c),1],label=c.item(),c=colors[c], marker='o')
-                    plt.scatter(snd_feature[(labels_unlabels == 0) & (trues==c),0], snd_feature[(labels_unlabels == 0) & (trues==c),1],label=c.item(),c=colors[c], marker='*')
-            else:
-                for c in trues.unique()[:preds.shape[1]]:
-                    plt.scatter(snd_feature[trues==c,0], snd_feature[trues==c,1],label=c.item(),c=colors[c])
-
-            plt.legend()
-            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-            plt.title('Via true labels - IN')
-
-            plt.subplot(1, 2, 2)
-            if get_results is not None:
-                for idx,c in enumerate(range(preds.shape[1])):
-                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),0],
-                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 1),1],
-                                label=c,c=colors[idx], marker="o")
-                    
-                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),0],
-                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c) & (labels_unlabels == 0),1],
-                                label=c,c=colors[idx], marker="*")
-            else:
-                for idx,c in enumerate(range(preds.shape[1])):
-                    plt.scatter(snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),0],
-                                snd_feature[(trues<preds.shape[1]) & (preds.argmax(1)==c),1],
-                                label=c,c=colors[idx])
-
-            plt.legend()
-            plt.xlim(snd_feature[:,0].min()*1.05, snd_feature[:,0].max()*1.05)
-            plt.ylim(snd_feature[:,1].min()*1.05, snd_feature[:,1].max()*1.05)
-            plt.title('Via prediction - IN')
-
-            plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}.png"))
-            plt.close('all')
-
-        if name == 'unlabel':
-            plt.hist((CLS_LOSS_IN).cpu().numpy(), label='Unlabel-In', alpha=.5, bins=100)
-            plt.hist((CLS_LOSS_OOD).cpu().numpy(), label='Unlabel-Ood', alpha=.5, bins=100)
-            plt.xlim(0,3)
-            plt.legend()
-            plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}+Unlabel+Cls+loss.png"))
-            plt.close('all')
-
-            plt.hist(CLS_LOSSES[labels_unlabels==1].cpu().numpy(), label='Label', alpha=.5, bins=100)
-            plt.hist((CLS_LOSS_IN).cpu().numpy(), label='Unlabel-In', alpha=.5, bins=100)
-            plt.hist((CLS_LOSS_OOD).cpu().numpy(), label='Unlabel-Ood', alpha=.5, bins=100)
-            plt.xlim(0,3)
-            plt.legend()
-            plt.savefig(os.path.join(self.ckpt_dir, f"timestamp={time}+type={name}+Label+Unlabel+Cls+loss.png"))
-            plt.close('all')
-            
-        if return_results:
-            return preds, trues, FEATURE, CLS_LOSS_IN, IDX
         
-    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch):
+    def logging_unlabeled_dataset(self,unlabeled_dataset,current_epoch):
 
         loader = DataLoader(dataset=unlabeled_dataset,
                             batch_size=128,
@@ -602,47 +402,178 @@ class Classification(Task):
                     x = data['x_ulb_w'].cuda(self.local_rank)
                     y = data['y_ulb'].cuda(self.local_rank)
 
-                    _, features = self.get_feature(x)
-                    select_idx = self.backbone.mlp(features).softmax(1)[:,0] > 0.5
+                    logits, features = self.get_feature(x)
+                    logits = self.backbone.scaling_logits(logits)
+                    probs = nn.functional.softmax(logits, 1)
+
+                    ova_logits = (self.backbone.ova_classifiers(features)).view(features.size(0),2,-1)
+                    outlier_score = (ova_logits.softmax(1)[:,0,:] * probs).sum(1)
+                    ova_in_logits = ova_logits.softmax(1)[:,1,:]
+
                     gt_idx = y < self.backbone.class_num
 
                     if batch_idx == 0:
-                        select_all = select_idx
                         gt_all = gt_idx
+                        probs_all, logits_all = probs, logits
+                        labels_all = y
+                        ova_in_all = ova_in_logits
+                        outlier_score_all = outlier_score
                     else:
-                        select_all = torch.cat([select_all, select_idx], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
+                        probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
+                        labels_all = torch.cat([labels_all, y], 0)
+                        outlier_score_all = torch.cat([outlier_score_all, outlier_score], 0)
+                        ova_in_all = torch.cat([ova_in_all, ova_in_logits],0)
                         
                     if self.local_rank == 0:
                         desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
+        select_all = outlier_score_all < 0.5
+
         select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
         select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
         select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        select_f1 = f1_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
 
         selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
 
         # Write TensorBoard summary
         if self.writer is not None:
-            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
             self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
             self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
             self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('Selected f1', select_f1, global_step=current_epoch)
+            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
 
-        self._set_learning_phase(train=True)
-        if current_epoch >= start_fix:
-            if len(selected_idx) > 0:
-                selected_dataset.set_index(selected_idx)
+            self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+            self.writer.add_scalar('In distribution: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
+
+            if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d over conf 0.95', ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum() / gt_all.sum() , global_step=current_epoch)
+
+            if ((gt_all) & (select_all)).sum()>0:
+                self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('In distribution under ood score 0.5: ACC(OVA)', TopKAccuracy(k=1)(ova_in_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d under ood score 0.5', ((gt_all) & (select_all)).sum() / gt_all.sum() , global_step=current_epoch)
+
+            if (probs_all.max(1)[0]>=0.95).sum()>0:
+                self.writer.add_scalar('Seen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum(), global_step=current_epoch)
                 
-    def cross_H_loss_func(self, logits_open, label, lambda_em):
+            if select_all.sum()>0:
+                self.writer.add_scalar('Seen-class ratio under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
 
-        probs_open = logits_open.softmax(1)
+                self.writer.add_scalar('Seen-class under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum(), global_step=current_epoch)
 
-        pos_pt = probs_open.gather(1,label.unsqueeze(1)).squeeze(1)
-        pos_losses = -torch.log(pos_pt+1e-8)
+            if ((select_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
+                self.writer.add_scalar('Seen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+
+                self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
+                    
+    @staticmethod
+    def clamp(smoothing_proposed):
         
-        entropy_losses = torch.sum(-probs_open * torch.log(probs_open + 1e-8),1)
+        smoothing_proposed_surgery = dict()
+        for index_, (key_, value_) in enumerate(smoothing_proposed.items()):
+            if value_ is None:
+                smoothing_proposed_surgery[key_] = None
+            else:
+                if index_ != (len(smoothing_proposed)-1):
+                    if key_<=value_<=list(smoothing_proposed.keys())[index_+1]:
+                        smoothing_proposed_surgery[key_] = value_
+                    elif value_<key_:
+                        smoothing_proposed_surgery[key_] = key_
+                    else:
+                        smoothing_proposed_surgery[key_] = list(smoothing_proposed.keys())[index_+1]
+                else:
+                    if key_<=value_<=1:
+                        smoothing_proposed_surgery[key_] = value_
+                    elif value_<key_:
+                        smoothing_proposed_surgery[key_] = key_
+                    else:
+                        smoothing_proposed_surgery[key_] = 1
+                        
+        return smoothing_proposed_surgery
+    
+    @staticmethod
+    def adaptive_smoothing(confidence, acc_distribution):
         
-        return pos_losses.mean() + lambda_em*entropy_losses.mean()
+        confidence_surgery = confidence.clone()
+        
+        for index_, (key_, value_) in enumerate(acc_distribution.items()):
+            if index_ != (len(acc_distribution)-1):
+                mask_ = ((confidence > key_) & (confidence <= list(acc_distribution.keys())[index_+1]))
+            else:
+                mask_ = ((confidence > key_) & (confidence <= 1))
+
+            if value_ is not None:
+                confidence_surgery[mask_] = value_
+                
+        return confidence_surgery
+    
+    def save_checkpoint(self, path: str, **kwargs):
+        ckpt = {
+            'backbone': self.backbone.state_dict(),
+            'optimizer': self.optimizer.state_dict()
+        }
+        if kwargs:
+            ckpt.update(kwargs)
+        torch.save(ckpt, path)
+        
+def ova_loss_func(logits_open, label):
+    # Eq.(1) in the paper
+    logits_open = logits_open.view(logits_open.size(0), 2, -1)
+    logits_open = nn.functional.softmax(logits_open, 1)
+    label_s_sp = torch.zeros((logits_open.size(0),
+                              logits_open.size(2))).long().to(label.device)
+    label_range = torch.arange(0, logits_open.size(0)).long()
+    label_s_sp[label_range, label] = 1  # one-hot labels, in the shape of (bsz, num_classes)
+    label_sp_neg = 1 - label_s_sp
+    open_loss = torch.mean(torch.sum(-torch.log(logits_open[:, 1, :] + 1e-8) * label_s_sp, 1))
+    open_loss_neg = torch.mean(torch.max(-torch.log(logits_open[:, 0, :] + 1e-8) * label_sp_neg, 1)[0])
+    l_ova = open_loss_neg + open_loss
+    return l_ova
+
+def ova_soft_loss_func(logits_open, confidence, label):
+    # Eq.(1) in the paper
+    logits_open = logits_open.view(logits_open.size(0), 2, -1)
+    logits_open = nn.functional.softmax(logits_open, 1)
+
+    label_s_sp = torch.zeros((logits_open.size(0),logits_open.size(2))).to(label.device)
+    label_range = torch.arange(0, logits_open.size(0)).long()
+    label_s_sp[label_range, label] = confidence  # one-hot labels, in the shape of (bsz, num_classes)
+
+    non_label_index = torch.ones((logits_open.size(0),logits_open.size(2))).to(label.device)
+    non_label_index[label_range, label] = 0
+    label_s_sp[non_label_index.bool()] = (1-confidence).repeat_interleave(logits_open.size(2)-1)
+
+    label_sp_neg = 1 - label_s_sp
+    open_loss = torch.mean(torch.sum(-torch.log(logits_open[:, 1, :] + 1e-8) * label_s_sp, 1))
+    open_loss_neg = torch.mean(torch.max(-torch.log(logits_open[:, 0, :] + 1e-8) * label_sp_neg, 1)[0])
+    l_ova = open_loss_neg + open_loss
+
+    return l_ova
+
+def socr_loss_func(logits_open_u1, logits_open_u2):
+    # Eq.(3) in the paper
+    logits_open_u1 = logits_open_u1.view(logits_open_u1.size(0), 2, -1)
+    logits_open_u2 = logits_open_u2.view(logits_open_u2.size(0), 2, -1)
+    logits_open_u1 = nn.functional.softmax(logits_open_u1, 1)
+    logits_open_u2 = nn.functional.softmax(logits_open_u2, 1)
+    l_socr = torch.mean(torch.sum(torch.sum(torch.abs(
+        logits_open_u1 - logits_open_u2) ** 2, 1), 1))
+    return l_socr

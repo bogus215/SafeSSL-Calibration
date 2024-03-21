@@ -5,6 +5,7 @@ import time
 import numpy as np
 import rich
 import torch
+import torch.nn as nn
 
 sys.path.append("./")
 from configs import Ablation2Config
@@ -83,40 +84,9 @@ def main_worker(local_rank: int, config: object):
         logger = None
     
     # Sub-Network Plus
-    import torch.nn as nn
-    class LULClassifier(nn.Module):
-        def __init__(self, feature, size, lambda_weight : float = 1e-5) -> None:
-            super().__init__()
-            
-            assert size>=2
-            
-            self.lambda_weight = lambda_weight
-            
-            modules = []
-            for _ in range(size-1):
-                modules.append(nn.Linear(feature,feature))
-                modules.append(nn.LayerNorm(feature))
-                modules.append(nn.LeakyReLU(0.1))
-            modules.append(nn.Linear(feature,2,bias=False))
-            
-            self.mlp = nn.Sequential(*modules)
-            
-        def forward(self,x):
-            x_ = x.detach()
-            return self.mlp(x_)
-        
-        def l2_norm_loss(self):
+    setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+    setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
 
-            sum_of_squares = 0
-            for param in self.mlp.parameters():
-                sum_of_squares += torch.sum(torch.pow(param, 2))
-
-            weights_reg = self.lambda_weight * sum_of_squares
-
-            return weights_reg
-            
-    setattr(model,'mlp', LULClassifier(model.output.in_features, size=config.layer_size, lambda_weight=config.lambda_weight))
-    
     initialize_weights(model)
     
     # Data (transforms & datasets)
@@ -130,7 +100,6 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA_Proposed(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
         unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
 
         eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -142,7 +111,6 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA_Proposed(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
         unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
 
         eval_set = TinyImageNet(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = TinyImageNet(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -154,7 +122,6 @@ def main_worker(local_rank: int, config: object):
 
         labeled_set = Selcted_DATA_Proposed(data_name=config.data, dataset=datasets['l_train'], name='train_lb',transform=train_trans)
         unlabeled_set = Selcted_DATA_Proposed(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA_Proposed(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
 
         eval_set = SVHN(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
@@ -189,18 +156,24 @@ def main_worker(local_rank: int, config: object):
     # Train & evaluate
     start = time.time()
     model.run(
-        train_set=[labeled_set,unlabeled_set,selcted_unlabeled_set],
+        train_set=[labeled_set,unlabeled_set],
         eval_set=eval_set,
         test_set=test_set,
         open_test_set=open_test_set,
+
         save_every=config.save_every,
         tau=config.tau,
-        tau_two=config.tau_two,
+
+        lambda_cali=config.lambda_cali,
+        lambda_ova_soft=config.lambda_ova_soft,
+        lambda_ova=config.lambda_ova,
+        lambda_fix=config.lambda_fix,
+
         start_fix=config.start_fix,
-        start_select=config.start_select,
+
         n_bins=config.n_bins,
+        train_n_bins=config.train_n_bins,
         enable_plot=config.enable_plot,
-        lambda_em=config.lambda_em,
         logger=logger
     )
     elapsed_sec = time.time() - start
