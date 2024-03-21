@@ -120,7 +120,7 @@ class Classification(Task):
                     epoch_history[k]['test'] = v1
 
                 if self.writer is not None:
-                    self.writer.add_scalar('Best_Test_top@1', test_history[0]['top@1'], global_step=epoch)
+                    self.writer.add_scalar('Best_Test_top@1', test_history['top@1'], global_step=epoch)
 
             # Write logs
             log = make_epoch_description(
