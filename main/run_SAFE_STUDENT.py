@@ -160,7 +160,6 @@ def main_worker(local_rank: int, config: object):
         enable_plot=config.enable_plot,
         logger=logger,
         ema_factor=config.ema_factor,
-        ema_update=config.ema_update,
         pretrain_train_split=config.pretrain_train_split
     )
     elapsed_sec = time.time() - start

@@ -6,7 +6,7 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import Sampler
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 from tasks.classification import Classification as Task
 from utils import TopKAccuracy
@@ -26,7 +26,6 @@ class Classification(Task):
             lambda_one,
             lambda_two,
             ema_factor,
-            ema_update, 
             pretrain_train_split,
             n_bins,
             **kwargs):  # pylint: disable=unused-argument
@@ -130,7 +129,7 @@ class Classification(Task):
             eval_history = self.evaluate(eval_loader, n_bins)
 
             """EMA update teacher model"""
-            if epoch in ema_update:            
+            if epoch % 10 == 0:            
                 for emp_p, p in zip(self.teacher.parameters(), self.backbone.parameters()):
                     emp_p.data = ema_factor * emp_p.data + (1 - ema_factor) * p.data
           
