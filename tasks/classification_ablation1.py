@@ -160,7 +160,6 @@ class Classification(Task):
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank),
-            "cali_temp": torch.zeros(iteration, device=self.local_rank),
             "cali_ova_temp": torch.zeros(iteration, device=self.local_rank),
         }
         
