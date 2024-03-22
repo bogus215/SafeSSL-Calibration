@@ -82,6 +82,14 @@ def main_worker(local_rank: int, config: object):
         setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
     elif config.for_what=='MTC':
         setattr(model,'domain_classifier', nn.Linear(model.output.in_features, 1))
+    elif config.for_what=='Ablation1':
+        setattr(model,'ova_cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+        setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
+    elif config.for_what=='Ablation2':
+        setattr(model,'cali_scaler', nn.Parameter(torch.ones(1) * 1.5))
+        setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
+    elif config.for_what=='Ablation3':
+        setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
     else:
         pass
 
