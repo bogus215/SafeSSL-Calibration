@@ -164,6 +164,7 @@ def main_worker(local_rank: int, config: object):
 
         save_every=config.save_every,
         tau=config.tau,
+        pi=config.pi,
 
         lambda_cali=config.lambda_cali,
         lambda_ova_soft=config.lambda_ova_soft,

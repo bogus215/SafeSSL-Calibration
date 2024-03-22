@@ -31,6 +31,7 @@ class Classification(Task):
 
             save_every,
             tau,
+            pi,
 
             lambda_cali,
             lambda_ova_soft,
@@ -87,6 +88,7 @@ class Classification(Task):
                                                          current_epoch=epoch,
                                                          start_fix=start_fix,
                                                          tau=tau,
+                                                         pi=pi,
 
                                                          lambda_cali=lambda_cali,
                                                          lambda_ova_soft=lambda_ova_soft,
@@ -160,7 +162,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, current_epoch, start_fix, tau, lambda_cali, lambda_ova_soft, lambda_ova_cali, lambda_ova, lambda_fix, smoothing_linear, smoothing_ova, n_bins):
+    def train(self, label_loader, unlabel_loader, current_epoch, start_fix, tau, pi, lambda_cali, lambda_ova_soft, lambda_ova_cali, lambda_ova, lambda_fix, smoothing_linear, smoothing_ova, n_bins):
         """Training defined for a single epoch."""
 
         iteration = len(label_loader)
@@ -255,7 +257,7 @@ class Classification(Task):
                             unlabel_confidence, unlabel_pseudo_y = unlabel_weak_scaled_softmax.max(1)
                             
                             ood_score = ((((self.backbone.scaling_logits(weak_ova_logit, name='ova_cali_scaler')).detach()).view(len(unlabel_weak_x),2,-1).softmax(1))[:,0,:] * unlabel_weak_scaled_softmax).sum(1)
-                            used_unlabeled_index = (ood_score < 0.5) & (unlabel_confidence > tau)
+                            used_unlabeled_index = (ood_score < pi) & (unlabel_confidence > tau)
 
                         if used_unlabeled_index.sum().item() != 0:
                             fix_loss = self.loss_function(strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
