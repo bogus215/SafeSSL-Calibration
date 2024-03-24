@@ -4,9 +4,8 @@
 --normalize
 --n-label-per-class=400
 --n-valid-per-class=500
---mismatch-ratio=0.30
+--mismatch-ratio=0.60
 --for-what=Proposed
---checkpoint-hash=2024-01-16_01-35-38
+--checkpoint-hash=2024-03-11_18-48-44
 --normalize
---layer-size=2
 --seed=2
