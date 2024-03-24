@@ -229,7 +229,7 @@ class Testing(Task):
         result = {
             'top@1': torch.zeros(1, device=self.local_rank),
             'ECE': np.zeros(1),
-            "F1": np.zeros(1)
+            "AUROC": np.zeros(1)
         }
 
         labels, logits  = [], []
@@ -256,14 +256,12 @@ class Testing(Task):
 
         labels, logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0)
         
-        in_pred = (logits.softmax(1).max(1)[0] >= 0.95).cpu()
-        in_label = torch.where(labels<logits.size(1),1,0)
+        ood_label = torch.where(labels>=logits.size(1),1,0)
 
         result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
-        
-        result['F1'][0] = f1_score(y_true=in_label, y_pred=in_pred)
-
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=(1-logits.softmax(1).max(1)[0]).cpu())
+    
         return {k: v.mean().item() for k, v in result.items()}
 
     @torch.no_grad()
