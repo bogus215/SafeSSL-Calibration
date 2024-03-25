@@ -10,5 +10,5 @@ do
                                 --mismatch-ratio 0.6 \
                                 --backbone-type wide28_2 \
                                 --checkpoint-hash ${HASH[$seed]} \
-                                --for-what Proposed
+                                --for-what Proposed --normalize
 done
