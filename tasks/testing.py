@@ -319,7 +319,7 @@ class Testing(Task):
         result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['AUROC'][0] = roc_auc_score(y_true=ood_label, y_score=(out_scores).cpu())
-        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=in_scores.numpy(),targets=in_label.numpy(),n_bins=15)
+        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=torch.max(in_scores,out_scores).numpy(),targets=in_label.numpy(),n_bins=15)
 
         return {k: v.mean().item() for k, v in result.items()}
 

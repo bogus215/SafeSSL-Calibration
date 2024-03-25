@@ -3,7 +3,7 @@
 --server=main
 --n-label-per-class=400
 --n-valid-per-class=500
---mismatch-ratio=0.3
+--mismatch-ratio=0.6
 --for-what=OPENMATCH
---checkpoint-hash=2024-01-28_18-37-56
+--checkpoint-hash=2024-02-14_22-35-30
 --seed=2
