@@ -274,7 +274,6 @@ class Testing(Task):
             'top@1': torch.zeros(1, device=self.local_rank),
             'ECE': np.zeros(1),
             'ECE-ova': np.zeros(1),
-            "F1": np.zeros(1),
             "AUROC": np.zeros(1),
             "SEEN-DETECTION-ECE": np.zeros(1),
         }
@@ -315,11 +314,11 @@ class Testing(Task):
         
         in_pred = (out_scores < 0.5).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
+        ood_label = torch.where(labels>=logits.size(1),1,0)
 
         result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
-        result['F1'][0] = f1_score(y_true=in_label, y_pred=in_pred)
-        result['AUROC'][0] = roc_auc_score(y_true=in_label, y_score=(1-out_scores).cpu())
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label, y_score=(out_scores).cpu())
         result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=in_scores.numpy(),targets=in_label.numpy(),n_bins=15)
 
         return {k: v.mean().item() for k, v in result.items()}
