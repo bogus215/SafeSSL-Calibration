@@ -12,3 +12,18 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what IOMATCH
 done
+
+SVHN_SEEDS=(1 2 5 6 10)
+HASH=(2023-12-01_12-41-54 2023-12-02_03-36-16 2023-12-02_18-40-01 2023-12-03_09-51-48 2023-12-04_01-01-18)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what IOMATCH
+done
