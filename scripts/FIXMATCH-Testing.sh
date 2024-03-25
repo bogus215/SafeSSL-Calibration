@@ -12,3 +12,17 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what FIXMATCH
 done
+
+SVHN_SEEDS=(1 2 5 6 10)
+HASH=(2024-03-08_00-26-05 2024-03-19_00-25-33 2024-03-19_05-01-27 2024-03-19_09-37-53 2024-03-19_14-18-15)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
+                                --data svhn --server main \
+                                --n-label-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what FIXMATCH
+done
