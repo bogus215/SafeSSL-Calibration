@@ -12,3 +12,17 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what MTC
 done
+
+SVHN_SEEDS=(1 2 5 6 10)
+HASH=(2024-03-14_21-05-16 2024-03-19_23-57-57 2024-03-20_13-09-08 2024-03-19_21-42-40 2024-03-20_00-38-31)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
+                                --data svhn --server main \
+                                --n-label-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what MTC
+done
