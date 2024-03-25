@@ -125,6 +125,8 @@ def main_worker(local_rank: int, config: object):
     model.run(
         for_what=config.for_what,
         open_test_set=open_test_set,
+        mismatch_ratio=config.mismatch_ratio,
+        safe_student_T=config.safe_student_T,
         logger=logger
     )
     elapsed_sec = time.time() - start

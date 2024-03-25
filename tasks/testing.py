@@ -59,6 +59,8 @@ class Testing(Task):
 
     def run(self,
             for_what,
+            mismatch_ratio,
+            safe_student_T,
             open_test_set: torch.utils.data.Dataset = None,
             **kwargs):  # pylint: disable=unused-argument
 
@@ -84,6 +86,8 @@ class Testing(Task):
         # Evaluate (Validation)
         if for_what=="Proposed":
             eval_history = self.proposed_evaluate(open_test_loader)
+        elif for_what=="SafeStudent":
+            eval_history = self.safestudent_evaluate(open_test_loader, mismatch_ratio=mismatch_ratio, safe_student_T=safe_student_T)
         elif for_what=="Ablation1":
             eval_history = self.ablation1_evaluate(open_test_loader)
         elif for_what=="Ablation2":
@@ -159,6 +163,61 @@ class Testing(Task):
         result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=(1-domain_score).cpu())
+        result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
+        result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
+
+        return {k: v.mean().item() for k, v in result.items()}
+
+    @torch.no_grad()
+    def safestudent_evaluate(self, data_loader, mismatch_ratio, safe_student_T, **kwargs):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+        result = {
+            'top@1': torch.zeros(1, device=self.local_rank),
+            'ECE': np.zeros(1),
+            "AUROC": np.zeros(1),
+            'In distribution over conf 0.95: ECE': np.zeros(1),
+            'In distribution under ood score 0.5: ECE': np.zeros(1)
+        }
+
+        labels, logits, scores = [], [], []
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Data Testing...", total=steps)
+
+            for i, batch in enumerate(data_loader):
+
+                x = batch['x'].to(self.local_rank)
+                y = batch['y'].to(self.local_rank)
+
+                logit = self.predict(x)
+                score = self.ed(logits=logit,t=safe_student_T)
+
+                labels.append(y.cpu())
+                logits.append(logit.cpu())
+                scores.append(score.cpu())
+
+                if self.local_rank == 0:
+                    desc = f"[bold pink] [{i+1}/{steps}] |"
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        labels, logits, scores = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(scores, axis=0)
+        scores = (scores - scores.min()) / (scores.max()-scores.min())
+
+        threshold = threshold_otsu(scores.cpu().numpy())
+
+        in_label = torch.where(labels<logits.size(1),1,0)
+        in_pred = (scores > threshold).cpu()
+        ood_label = torch.where(labels>=logits.size(1),1,0)
+
+        result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
+        result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=1-scores)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
 
@@ -710,3 +769,12 @@ class Testing(Task):
         plt.close('all')
         
         return ece
+    
+    @staticmethod
+    def ed(logits,t):
+        
+        assert logits.dim()==2, "logits = [Batch size, Number of seen classes]"
+        
+        ed = logits.div(t).exp().sum(1).log().mul(t) - (logits.div(t).exp().sum(1) - logits.div(t).exp().max(1)[0] + 1e-5).log().mul(t)
+
+        return ed

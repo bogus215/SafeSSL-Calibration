@@ -430,7 +430,7 @@ class Classification(Task):
         
         assert logits.dim()==2, "logits = [Batch size, Number of seen classes]"
         
-        ed = logits.div(t).exp().sum(1).log().mul(t) - (logits.div(t).exp().sum(1) - logits.div(t).exp().max(1)[0]).log().mul(t)
+        ed = logits.div(t).exp().sum(1).log().mul(t) - (logits.div(t).exp().sum(1) - logits.div(t).exp().max(1)[0] + 1e-5).log().mul(t)
 
         return ed
 
