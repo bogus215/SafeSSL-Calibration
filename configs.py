@@ -485,7 +485,7 @@ class SafeStudentConfig(ConfigBase):
         parser.add_argument('--lambda-two', type=float, default=0.01, help="coefficient for UCD loss")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
         parser.add_argument('--ema-factor', type=float, default=0.996)
-        parser.add_argument('--pretrain-train-split', type=int, default=2 , help='')
+        parser.add_argument('--pretrain-train-split', type=int, default=5 , help='')
 
         return parser
 
