@@ -320,6 +320,22 @@ class Ablation3Config(ConfigBase):
     @property
     def task(self) -> str:
         return "Ablation3"
+
+class Ablation4Config(Ablation1Config):
+    def __init__(self, args=None, **kwargs):
+        super(Ablation4Config, self).__init__(args, **kwargs)
+
+    @property
+    def task(self) -> str:
+        return "Ablation4"
+
+class Ablation5Config(Ablation2Config):
+    def __init__(self, args=None, **kwargs):
+        super(Ablation5Config, self).__init__(args, **kwargs)
+
+    @property
+    def task(self) -> str:
+        return "Ablation5"
     
 class IOMATCHConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
