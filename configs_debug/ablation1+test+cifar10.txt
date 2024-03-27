@@ -1,0 +1,11 @@
+--gpus=0
+--data=cifar10
+--server=main
+--normalize
+--n-label-per-class=400
+--n-valid-per-class=500
+--mismatch-ratio=0.60
+--for-what=Ablation1
+--checkpoint-hash=2024-03-21_17-54-25
+--normalize
+--seed=2
