@@ -399,10 +399,14 @@ class Testing(Task):
             'top@1-ova': torch.zeros(1, device=self.local_rank),
             'ECE': np.zeros(1),
             'ECE-ova': np.zeros(1),
-            "F1": np.zeros(1),
+            "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
-            "SEEN-DETECTION-ECE": np.zeros(1),
+            "IN-SEEN-DETECTION-ECE": np.zeros(1),
+            "OOD-SEEN-DETECTION-ECE": np.zeros(1),
+            "ALL-SEEN-DETECTION-ECE": np.zeros(1),
         }
 
         labels, logits, ova_scores, ova_logits = [], [], [], []
@@ -437,16 +441,25 @@ class Testing(Task):
         labels, logits, ova_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(ova_scores,axis=0), torch.cat(ova_logits,axis=0)
         
         in_pred = (ova_scores[:,0] < 0.5).cpu()
+        ood_pred = (ova_scores[:,1] < 0.5).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
+        ood_label = torch.where(labels>=logits.size(1),1,0)
 
         result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
         result['top@1-ova'][0] = TopKAccuracy(k=1)(ova_logits.softmax(dim=1)[labels<logits.size(1),1,:], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
-        result['F1'][0] = f1_score(y_true=in_label, y_pred=in_pred)
+        
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=ova_scores[:,0])
+
+        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
+        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
+
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
+        result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
-        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),n_bins=15)
         
         return {k: v.mean().item() for k, v in result.items()}
 
@@ -462,9 +475,13 @@ class Testing(Task):
             'ECE': np.zeros(1),
             'ECE-ova': np.zeros(1),
             "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
-            "SEEN-DETECTION-ECE": np.zeros(1),
+            "IN-SEEN-DETECTION-ECE": np.zeros(1),
+            "OOD-SEEN-DETECTION-ECE": np.zeros(1),
+            "ALL-SEEN-DETECTION-ECE": np.zeros(1),
         }
 
         labels, logits, ova_scores, ova_logits = [], [], [], []
@@ -500,6 +517,7 @@ class Testing(Task):
         labels, logits, ova_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(ova_scores,axis=0), torch.cat(ova_logits,axis=0)
         
         in_pred = (ova_scores[:,0] < 0.5).cpu()
+        ood_pred = (ova_scores[:,1] < 0.5).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
         ood_label = torch.where(labels>=logits.size(1),1,0)
 
@@ -507,10 +525,17 @@ class Testing(Task):
         result['top@1-ova'][0] = TopKAccuracy(k=1)(ova_logits.softmax(dim=1)[labels<logits.size(1),1,:], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
+        
         result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=ova_scores[:,0])
+
+        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
+        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
+
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
+        result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
-        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),n_bins=15)
         
         return {k: v.mean().item() for k, v in result.items()}
 
@@ -526,11 +551,15 @@ class Testing(Task):
             'ECE': np.zeros(1),
             'ECE-ova': np.zeros(1),
             "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
-            "SEEN-DETECTION-ECE": np.zeros(1),
+            "IN-SEEN-DETECTION-ECE": np.zeros(1),
+            "OOD-SEEN-DETECTION-ECE": np.zeros(1),
+            "ALL-SEEN-DETECTION-ECE": np.zeros(1),
         }
-
+        
         labels, logits, ova_scores, ova_logits = [], [], [], []
 
         with Progress(transient=True, auto_refresh=False) as pg:
@@ -562,6 +591,7 @@ class Testing(Task):
         labels, logits, ova_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(ova_scores,axis=0), torch.cat(ova_logits,axis=0)
         
         in_pred = (ova_scores[:,0] < 0.5).cpu()
+        ood_pred = (ova_scores[:,1] < 0.5).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
         ood_label = torch.where(labels>=logits.size(1),1,0)
 
@@ -569,10 +599,17 @@ class Testing(Task):
         result['top@1-ova'][0] = TopKAccuracy(k=1)(ova_logits.softmax(dim=1)[labels<logits.size(1),1,:], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
+        
         result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=ova_scores[:,0])
+
+        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
+        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
+
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
+        result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
-        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),n_bins=15)
         
         return {k: v.mean().item() for k, v in result.items()}
         
@@ -594,6 +631,7 @@ class Testing(Task):
             'In distribution under ood score 0.5: ECE': np.zeros(1),
             "IN-SEEN-DETECTION-ECE": np.zeros(1),
             "OOD-SEEN-DETECTION-ECE": np.zeros(1),
+            "ALL-SEEN-DETECTION-ECE": np.zeros(1),
         }
 
         labels, logits, ova_scores, ova_logits = [], [], [], []
@@ -642,11 +680,11 @@ class Testing(Task):
         result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
         result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
 
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
+        result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
-
-        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
-        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=ood_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=ood_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
         
         return {k: v.mean().item() for k, v in result.items()}
 
@@ -806,9 +844,13 @@ class Testing(Task):
             'ECE': np.zeros(1),
             'ECE-ova': np.zeros(1),
             "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
-            "SEEN-DETECTION-ECE": np.zeros(1),
+            "IN-SEEN-DETECTION-ECE": np.zeros(1),
+            "OOD-SEEN-DETECTION-ECE": np.zeros(1),
+            "ALL-SEEN-DETECTION-ECE": np.zeros(1),
         }
 
         labels, logits, ova_scores, ova_logits = [], [], [], []
@@ -842,6 +884,7 @@ class Testing(Task):
         labels, logits, ova_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(ova_scores,axis=0), torch.cat(ova_logits,axis=0)
         
         in_pred = (ova_scores[:,0] < 0.5).cpu()
+        ood_pred = (ova_scores[:,1] < 0.5).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
         ood_label = torch.where(labels>=logits.size(1),1,0)
 
@@ -849,10 +892,17 @@ class Testing(Task):
         result['top@1-ova'][0] = TopKAccuracy(k=1)(ova_logits.softmax(dim=1)[labels<logits.size(1),1,:], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
+        
         result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=ova_scores[:,0])
+
+        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
+        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
+
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
+        result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
-        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),n_bins=15)
         
         return {k: v.mean().item() for k, v in result.items()}
     
@@ -868,9 +918,13 @@ class Testing(Task):
             'ECE': np.zeros(1),
             'ECE-ova': np.zeros(1),
             "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
-            "SEEN-DETECTION-ECE": np.zeros(1),
+            "IN-SEEN-DETECTION-ECE": np.zeros(1),
+            "OOD-SEEN-DETECTION-ECE": np.zeros(1),
+            "ALL-SEEN-DETECTION-ECE": np.zeros(1),
         }
 
         labels, logits, ova_scores, ova_logits = [], [], [], []
@@ -906,6 +960,7 @@ class Testing(Task):
         labels, logits, ova_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(ova_scores,axis=0), torch.cat(ova_logits,axis=0)
         
         in_pred = (ova_scores[:,0] < 0.5).cpu()
+        ood_pred = (ova_scores[:,1] < 0.5).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
         ood_label = torch.where(labels>=logits.size(1),1,0)
 
@@ -913,9 +968,16 @@ class Testing(Task):
         result['top@1-ova'][0] = TopKAccuracy(k=1)(ova_logits.softmax(dim=1)[labels<logits.size(1),1,:], labels[labels<logits.size(1)])
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
+        
         result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=ova_scores[:,0])
+
+        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
+        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
+
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
+        result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
-        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),n_bins=15)
         
         return {k: v.mean().item() for k, v in result.items()}
