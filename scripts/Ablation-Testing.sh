@@ -27,3 +27,63 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what Ablation2 --normalize
 done
+
+CIFAR10_SEEDS=(2 6)
+HASH=(2024-03-27_18-13-42 2024-03-28_04-19-58)
+
+for seed in 0 1
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Ablation4 --normalize
+done
+
+CIFAR10_SEEDS=(2 6)
+HASH=(2024-03-27_18-17-56 2024-03-28_04-26-51)
+
+for seed in 0 1
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.9 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Ablation4 --normalize
+done
+
+CIFAR10_SEEDS=(2 6)
+HASH=(2024-03-27_23-19-48 2024-03-28_09-19-33)
+
+for seed in 0 1
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Ablation5 --normalize
+done
+
+CIFAR10_SEEDS=(2 6)
+HASH=(2024-03-27_23-26-12 2024-03-28_09-34-33)
+
+for seed in 0 1
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.9 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Ablation5 --normalize
+done
