@@ -588,9 +588,12 @@ class Testing(Task):
             'ECE': np.zeros(1),
             'ECE-ova': np.zeros(1),
             "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
-            "SEEN-DETECTION-ECE": np.zeros(1),
+            "IN-SEEN-DETECTION-ECE": np.zeros(1),
+            "OOD-SEEN-DETECTION-ECE": np.zeros(1),
         }
 
         labels, logits, ova_scores, ova_logits = [], [], [], []
@@ -625,6 +628,7 @@ class Testing(Task):
         labels, logits, ova_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(ova_scores,axis=0), torch.cat(ova_logits,axis=0)
         
         in_pred = (ova_scores[:,0] < 0.5).cpu()
+        ood_pred = (ova_scores[:,1] < 0.5).cpu()
         in_label = torch.where(labels<logits.size(1),1,0)
         ood_label = torch.where(labels>=logits.size(1),1,0)
 
@@ -634,10 +638,15 @@ class Testing(Task):
         result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
         
         result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=ova_scores[:,0])
-        
+
+        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
+        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
+
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
-        result['SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),n_bins=15)
+
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=ood_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=ood_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
         
         return {k: v.mean().item() for k, v in result.items()}
 
@@ -715,7 +724,7 @@ class Testing(Task):
 
         return ece
     
-    def seen_unseen_detection_get_ece(self, predicted_label: np.array, confidences: np.array, targets: np.array, n_bins: int=15):
+    def seen_unseen_detection_get_ece(self, predicted_label: np.array, confidences: np.array, targets: np.array, title: str, n_bins: int=15):
 
         bin_boundaries = np.linspace(0,1,n_bins+1)
         bin_lowers = bin_boundaries[:-1]
@@ -758,7 +767,7 @@ class Testing(Task):
         plt.ylim(0,1)
         plt.xticks(bin_boundaries,bin_boundaries.round(2))
         plt.legend()
-        plt.savefig(os.path.join(self.ckpt_dir,'SEEN-DETECTION-ECE.png'))
+        plt.savefig(os.path.join(self.ckpt_dir,f'{title}-SEEN-UNSEEN-Reliablity.png'))
         plt.close('all')
 
         plt.bar(np.array(x_ticks)[np.array(x_ticks)!=None], np.array(y_ticks_second_ticks)[np.array(x_ticks)!=None], ecolor = 'blue', width = bin_lowers[1] , edgecolor='black')
@@ -771,7 +780,7 @@ class Testing(Task):
         plt.ylabel('% of Samples')
         plt.xlim(0,1)
         plt.ylim(0,1)
-        plt.savefig(os.path.join(self.ckpt_dir,'CONFIDENCE_HISTOGRAM.png'))
+        plt.savefig(os.path.join(self.ckpt_dir,f'{title}-SEEN-UNSEEN-Histogram.png'))
         plt.close('all')
         
         return ece
