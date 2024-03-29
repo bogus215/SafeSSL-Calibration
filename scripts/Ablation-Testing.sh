@@ -87,3 +87,32 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what Ablation5 --normalize
 done
+
+
+SVHN_SEEDS=(1 2 5 6 10)
+HASH=(2024-03-28_20-30-37 2024-03-29_01-42-04 2024-03-29_06-41-02 2024-03-28_20-30-30 2024-03-29_01-40-21)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
+                                --data svhn --server workstation3 \
+                                --n-label-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Ablation1
+done
+
+SVHN_SEEDS=(1 2 5 6 10)
+HASH=(2024-03-28_20-30-44 2024-03-29_01-29-52 2024-03-29_06-27-30 2024-03-29_06-45-08)
+
+for seed in 0 1 2 3
+do
+    python ./main/run_testing.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
+                                --data svhn --server workstation3 \
+                                --n-label-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Ablation2
+done
