@@ -146,3 +146,33 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what Ablation2
 done
+
+TINY_SEEDS=(1 5 10)
+HASH=(2024-03-29_18-33-05 2024-03-30_05-02-48 2024-03-30_15-07-26)
+
+for seed in 0 1 2
+do
+    python ./main/run_testing.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
+                                --data tiny --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Ablation1
+done
+
+TINY_SEEDS=(1 5 10)
+HASH=(2024-03-29_21-32-50 2024-03-30_07-36-40 2024-03-30_17-41-53)
+
+for seed in 0 1 2
+do
+    python ./main/run_testing.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
+                                --data tiny --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Ablation2
+done
