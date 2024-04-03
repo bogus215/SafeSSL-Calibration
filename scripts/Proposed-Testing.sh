@@ -27,3 +27,18 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what Proposed
 done
+
+CIFAR100_SEEDS=(1)
+HASH=(2024-03-11_13-50-23)
+
+for seed in 0
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
+                                --data cifar100 --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Proposed --normalize
+done

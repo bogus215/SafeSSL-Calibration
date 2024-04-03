@@ -147,10 +147,10 @@ do
                                 --for-what Ablation2
 done
 
-TINY_SEEDS=(1 5 10)
-HASH=(2024-03-29_18-33-05 2024-03-30_05-02-48 2024-03-30_15-07-26)
+TINY_SEEDS=(1 5 10 1)
+HASH=(2024-03-29_18-33-05 2024-03-30_05-02-48 2024-03-30_15-07-26 2024-04-02_08-29-55)
 
-for seed in 0 1 2
+for seed in 0 1 2 3
 do
     python ./main/run_testing.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
                                 --data tiny --server main \
