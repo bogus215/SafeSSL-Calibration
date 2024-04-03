@@ -227,10 +227,8 @@ class Classification(Task):
 
                     if smoothing_linear is not None:
 
-                        smoothing_proposed_surgery = self.clamp(smoothing_linear)
-
                         labeled_confidence = label_logit.softmax(dim=-1).max(1)[0].detach()
-                        label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery)
+                        label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_linear,class_num=self.backbone.class_num)
 
                         for_one_hot_label = nn.functional.one_hot(label_y,num_classes=self.backbone.output.out_features)
                         for_smoothoed_target_label = (label_confidence_surgery.view(-1,1)*(for_one_hot_label==1) + ((1-label_confidence_surgery)/(self.backbone.output.out_features-1)).view(-1,1)*(for_one_hot_label!=1))
@@ -240,10 +238,9 @@ class Classification(Task):
                     ova_cali_loss = torch.tensor(0).cuda(self.local_rank)
 
                     if smoothing_ova is not None:
-                        smoothing_proposed_surgery = self.clamp(smoothing_ova)
-
+                        
                         labeled_confidence = label_ova_logit.view(len(label_ova_logit),2,-1).softmax(1)[:,1,:].max(1)[0].detach()
-                        label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery)
+                        label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_ova,class_num=2)
 
                         ova_cali_loss = ova_soft_loss_func(self.backbone.scaling_logits(label_ova_logit, name='ova_cali_scaler'), label_confidence_surgery, label_y)
 
@@ -763,32 +760,7 @@ class Classification(Task):
                 self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
                     
     @staticmethod
-    def clamp(smoothing_proposed):
-        
-        smoothing_proposed_surgery = dict()
-        for index_, (key_, value_) in enumerate(smoothing_proposed.items()):
-            if value_ is None:
-                smoothing_proposed_surgery[key_] = None
-            else:
-                if index_ != (len(smoothing_proposed)-1):
-                    if key_<=value_<=list(smoothing_proposed.keys())[index_+1]:
-                        smoothing_proposed_surgery[key_] = value_
-                    elif value_<key_:
-                        smoothing_proposed_surgery[key_] = key_
-                    else:
-                        smoothing_proposed_surgery[key_] = list(smoothing_proposed.keys())[index_+1]
-                else:
-                    if key_<=value_<=1:
-                        smoothing_proposed_surgery[key_] = value_
-                    elif value_<key_:
-                        smoothing_proposed_surgery[key_] = key_
-                    else:
-                        smoothing_proposed_surgery[key_] = 1
-                        
-        return smoothing_proposed_surgery
-    
-    @staticmethod
-    def adaptive_smoothing(confidence, acc_distribution):
+    def adaptive_smoothing(confidence, acc_distribution, class_num):
         
         confidence_surgery = confidence.clone()
         
@@ -799,7 +771,7 @@ class Classification(Task):
                 mask_ = ((confidence > key_) & (confidence <= 1))
 
             if value_ is not None:
-                confidence_surgery[mask_] = value_
+                confidence_surgery[mask_] = value_ if value_ >= (1/class_num) else (1/class_num)
                 
         return confidence_surgery
     
