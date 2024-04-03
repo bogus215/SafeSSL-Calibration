@@ -117,10 +117,10 @@ do
                                 --for-what Ablation2
 done
 
-CIFAR100_SEEDS=(1 5 10)
-HASH=(2024-03-29_13-36-05 2024-03-30_00-05-08 2024-03-30_10-09-20)
+CIFAR100_SEEDS=(1 5 10 1)
+HASH=(2024-03-29_13-36-05 2024-03-30_00-05-08 2024-03-30_10-09-20 2024-04-03_00-28-17)
 
-for seed in 0 1 2
+for seed in 0 1 2 3
 do
     python ./main/run_testing.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
                                 --data cifar100 --server main \
