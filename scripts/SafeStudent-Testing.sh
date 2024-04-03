@@ -1,7 +1,7 @@
 CIFAR10_SEEDS=(2 6 7 8 9)
 HASH=(2024-03-21_20-58-29 2024-04-02_00-46-56 2024-04-02_02-18-43 2024-04-02_03-50-53 2024-04-02_05-23-24)
 
-for seed in 0
+for seed in 0 1 2 3 4
 do
     python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
                                 --data cifar10 --server main \
