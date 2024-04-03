@@ -28,10 +28,10 @@ do
                                 --for-what Proposed
 done
 
-CIFAR100_SEEDS=(1)
-HASH=(2024-03-11_13-50-23)
+CIFAR100_SEEDS=(1 1)
+HASH=(2024-03-11_13-50-23 2024-04-03_14-20-48)
 
-for seed in 0
+for seed in 0 1
 do
     python ./main/run_testing.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
                                 --data cifar100 --server main \
