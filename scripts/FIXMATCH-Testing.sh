@@ -26,3 +26,18 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what FIXMATCH
 done
+
+CIFAR100_SEEDS=(1 2 5 6 10)
+HASH=(2023-09-06_23-39-19 2023-09-07_12-25-10 2023-09-08_08-18-48 2023-09-08_22-01-15 2023-09-09_14-36-12)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
+                                --data cifar100 --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what FIXMATCH
+done
