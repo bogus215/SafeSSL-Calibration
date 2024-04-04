@@ -42,3 +42,18 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what Proposed --normalize
 done
+
+TINY_SEEDS=(1 2 5 6 10)
+HASH=(2024-04-04_11-45-38 2024-04-04_14-26-17 2024-04-04_17-06-33 2024-04-04_19-47-26)
+
+for seed in 0 1 2 3
+do
+    python ./main/run_testing.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
+                                --data tiny --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what Proposed --normalize
+done
