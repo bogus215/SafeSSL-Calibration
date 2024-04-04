@@ -26,3 +26,33 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what MTC
 done
+
+CIFAR100_SEEDS=(1 2 5 6 10)
+HASH=(Cifar100-Seed1 Cifar100-Seed2 Cifar100-Seed3 Cifar100-Seed4 Cifar100-Seed5)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
+                                --data cifar100 --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what MTC
+done
+
+TINY_SEEDS=(1 2 5 6 10)
+HASH=(Tiny-Seed1 Tiny-Seed2 Tiny-Seed3 Tiny-Seed4 Tiny-Seed5)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
+                                --data tiny --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what MTC
+done
