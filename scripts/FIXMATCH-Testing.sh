@@ -41,3 +41,18 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what FIXMATCH
 done
+
+TINY_SEEDS=(1 2 5 6 10)
+HASH=(2023-11-29_07-31-10 2023-11-29_14-13-54 2023-11-29_21-09-01 2023-11-30_04-12-26 2023-11-30_11-14-25)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
+                                --data tiny --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what FIXMATCH
+done
