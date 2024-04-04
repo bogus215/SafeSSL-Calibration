@@ -26,3 +26,34 @@ do
                                 --checkpoint-hash ${HASH[$seed]} \
                                 --for-what IOMATCH
 done
+
+
+CIFAR100_SEEDS=(1 2 5 6 10)
+HASH=(2023-12-01_12-30-34 2023-12-02_03-16-55 2023-12-02_18-27-51 2023-12-03_09-39-52 2023-12-04_00-21-34)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
+                                --data cifar100 --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what IOMATCH
+done
+
+TINY_SEEDS=(1 2 5 6 10)
+HASH=(2023-12-01_12-33-36 2023-12-02_03-34-54 2023-12-02_18-11-39 2023-12-03_09-22-29 2023-12-04_00-35-57)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
+                                --data tiny --server main \
+                                --n-label-per-class 100 \
+                                --n-valid-per-class 50 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${HASH[$seed]} \
+                                --for-what IOMATCH
+done
