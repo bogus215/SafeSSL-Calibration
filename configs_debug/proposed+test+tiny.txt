@@ -1,0 +1,11 @@
+--gpus=0
+--data=tiny
+--server=main
+--normalize
+--n-label-per-class=100
+--n-valid-per-class=50
+--mismatch-ratio=0.60
+--for-what=Proposed
+--checkpoint-hash=2024-04-04_11-45-38
+--normalize
+--seed=1
