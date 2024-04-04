@@ -200,12 +200,13 @@ class Classification(Task):
                     ova_cali_loss = torch.tensor(0).cuda(self.local_rank)
 
                     if smoothing_ova is not None:
+                        
                         smoothing_proposed_surgery = self.clamp(smoothing_ova)
 
                         labeled_confidence = label_ova_logit.view(len(label_ova_logit),2,-1).softmax(1)[:,1,:].max(1)[0].detach()
-                        label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery)
+                        label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery,class_num=2)
 
-                        ova_cali_loss = ova_soft_loss_func(self.backbone.scaling_logits(label_ova_logit, name='ova_cali_scaler'), label_confidence_surgery, label_y)
+                        ova_cali_loss = ova_soft_loss_func(self.backbone.scaling_logits(label_ova_logit.detach(), name='ova_cali_scaler'), label_confidence_surgery, label_y)
 
                     fix_loss = torch.tensor(0).cuda(self.local_rank)
 
@@ -495,7 +496,7 @@ class Classification(Task):
         return smoothing_proposed_surgery
     
     @staticmethod
-    def adaptive_smoothing(confidence, acc_distribution):
+    def adaptive_smoothing(confidence, acc_distribution, class_num):
         
         confidence_surgery = confidence.clone()
         
@@ -506,7 +507,7 @@ class Classification(Task):
                 mask_ = ((confidence > key_) & (confidence <= 1))
 
             if value_ is not None:
-                confidence_surgery[mask_] = value_
+                confidence_surgery[mask_] = value_ if value_ >= (1/class_num) else (1/class_num)
                 
         return confidence_surgery
     
