@@ -1,0 +1,12 @@
+easydict==1.13
+matplotlib==3.8.3
+numpy==1.26.4
+opencv_python_headless==4.9.0.80
+Pillow==10.0.1
+Pillow==10.2.0
+rich==13.7.1
+scikit_learn==1.4.1.post1
+seaborn==0.13.2
+skimage==0.0
+torch==2.1.0
+tqdm==4.65.0

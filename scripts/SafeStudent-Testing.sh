@@ -13,10 +13,10 @@ do
                                 --for-what SafeStudent
 done
 
-SVHN_SEEDS=(1)
-HASH=(2024-03-22_02-06-26)
+SVHN_SEEDS=(1 2 5 6 10)
+HASH=(2024-03-22_02-06-26 2024-04-03_02-50-36 2024-04-03_04-28-22 2024-04-03_06-01-21 2024-04-03_07-37-36)
 
-for seed in 0
+for seed in 0 1 2 3 4
 do
     python ./main/run_testing.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
                                 --data svhn --server main \
