@@ -306,15 +306,14 @@ class Classification(Task):
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Evaluating...", total=steps)
 
-            pred,true,ova_pred,IDX=[],[],[],[]
+            unscaled_pred, pred, ova_pred, true = [], [], [], []
             for i, batch in enumerate(data_loader):
 
                 x = batch['x'].to(self.local_rank)
                 y = batch['y'].to(self.local_rank)
-                idx = batch['idx'].to(self.local_rank)
 
-                logits, features = self.get_feature(x)
-                logits = self.backbone.scaling_logits(logits)
+                unscaled_logit, features = self.get_feature(x)
+                logits = self.backbone.scaling_logits(unscaled_logit)
 
                 loss = self.loss_function(logits, y.long())
 
@@ -323,9 +322,11 @@ class Classification(Task):
 
                 result['loss'][i] = loss
                 true.append(y.cpu())
+
                 pred.append(logits.cpu())
                 ova_pred.append(ova_logits.cpu())
-                IDX += [idx]
+
+                unscaled_pred.append(unscaled_logit.cpu())
                 
                 if self.local_rank == 0:
                     desc = f"[bold green] [{i+1}/{steps}]: " + f" loss : {result['loss'][:i+1].mean():.4f} |" + f" top@1 : {TopKAccuracy(k=1)(logits, y).detach():.4f} |"
@@ -334,13 +335,15 @@ class Classification(Task):
 
         # preds, pred are logit vectors
         preds, trues, ova_preds = torch.cat(pred,axis=0), torch.cat(true,axis=0), torch.cat(ova_pred)
+        unscaled_preds = torch.cat(unscaled_pred,axis=0)
+
         result['top@1'][0] = TopKAccuracy(k=1)(preds, trues)
         result['ova-top@1'][0] = TopKAccuracy(k=1)(ova_preds, trues)
 
         ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=n_bins, plot=False)
         result['ece'][0] = ece_results[0]
 
-        train_ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
+        train_ece_results = self.get_ece(preds=unscaled_preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
         train_ece_results_ova = self.get_ece(preds=ova_preds.numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
         
         return {k: v.mean().item() for k, v in result.items()}, train_ece_results[1], train_ece_results_ova[1]
