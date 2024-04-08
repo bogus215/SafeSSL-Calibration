@@ -378,7 +378,7 @@ class Classification(Task):
         ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=n_bins, plot=False)
         result['ece'][0] = ece_results[0]
 
-        train_ece_results = self.get_ece(preds=unscaled_preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
+        train_ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
         train_ece_results_ova = self.get_ece(preds=unscaled_ova_preds.numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
         
         return {k: v.mean().item() for k, v in result.items()}, train_ece_results[1], train_ece_results_ova[1]
