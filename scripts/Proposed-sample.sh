@@ -15,7 +15,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.05 --lambda-ova 0.1 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v25
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v26
 
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
                                     --data cifar10 --server main --enable-wandb \
@@ -25,7 +25,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.05 --lambda-ova 0.1 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v25
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v26
 
         python ./main/run_PROPOSED.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
                                     --data tiny --server main --enable-wandb \
@@ -35,7 +35,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.05 --lambda-ova 0.1 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v25
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v26
 
         python ./main/run_PROPOSED.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
                                     --data svhn --server main --enable-wandb \
@@ -44,7 +44,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.05 --lambda-ova 0.5 \
-                                    --weight-decay 0 --wandb-proj-v=-v25
+                                    --weight-decay 0 --wandb-proj-v=-v26
 
         python ./main/run_ablation1.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
                                     --data cifar10 --server main --enable-wandb \
@@ -54,7 +54,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.05 --lambda-ova 0.1 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v25
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v26
 
         python ./main/run_ablation2.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
                                     --data cifar10 --server main --enable-wandb \
@@ -63,7 +63,7 @@ do
                                     --mismatch-ratio $ratio \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --lambda-ova 0.1 --weight-decay 0 --normalize --wandb-proj-v=-v25
+                                    --lambda-ova 0.1 --weight-decay 0 --normalize --wandb-proj-v=-v26
 
         python ./main/run_ablation1.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
                                     --data cifar100 --server main --enable-wandb \
@@ -73,7 +73,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.05 --lambda-ova 0.1 \
-                                    --weight-decay 0 --wandb-proj-v=-v25
+                                    --weight-decay 0 --wandb-proj-v=-v26
 
         python ./main/run_ablation2.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
                                     --data cifar100 --server main --enable-wandb \
@@ -83,7 +83,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova 0.1 \
-                                    --weight-decay 0 --wandb-proj-v=-v25
+                                    --weight-decay 0 --wandb-proj-v=-v26
 
         python ./main/run_ablation1.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
                                     --data tiny --server main --enable-wandb \
@@ -93,7 +93,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.05 --lambda-ova 0.1 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v25
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v26
 
         python ./main/run_ablation2.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
                                     --data tiny --server main --enable-wandb \
@@ -103,7 +103,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova 0.1 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v25
+                                    --weight-decay 0 --normalize --wandb-proj-v=-v26
 
         python ./main/run_ablation1.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
                                     --data svhn --server main --enable-wandb \
@@ -112,7 +112,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.05 --lambda-ova 0.5 \
-                                    --weight-decay 0 --wandb-proj-v=-v25
+                                    --weight-decay 0 --wandb-proj-v=-v26
 
         python ./main/run_ablation2.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
                                     --data svhn --server main --enable-wandb \
@@ -121,7 +121,6 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova 0.5 \
-                                    --weight-decay 0 --wandb-proj-v=-v25
-
+                                    --weight-decay 0 --wandb-proj-v=-v26
     done
 done
