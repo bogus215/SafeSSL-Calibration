@@ -206,7 +206,7 @@ class Classification(Task):
                         labeled_confidence = label_ova_logit.view(len(label_ova_logit),2,-1).softmax(1)[:,1,:].max(1)[0].detach()
                         label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery,class_num=2)
 
-                        ova_cali_loss = ova_soft_loss_func(self.backbone.scaling_logits(label_ova_logit, name='ova_cali_scaler'), label_confidence_surgery, label_y)
+                        ova_cali_loss = ova_soft_loss_func(self.backbone.scaling_logits(label_ova_logit.detach(), name='ova_cali_scaler'), label_confidence_surgery, label_y)
 
                     fix_loss = torch.tensor(0).cuda(self.local_rank)
 

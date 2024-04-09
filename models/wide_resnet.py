@@ -127,9 +127,9 @@ class WRN(nn.Module):
 
         # Expand temperature to match the size of logits
         temperature = getattr(self,name).unsqueeze(1).expand(logits.size(0), logits.size(1))
-        temperature = torch.clip(temperature,max=3,min=1)
+        temperature = torch.clip(temperature,max=5,min=1)
         
-        return logits / (torch.abs(temperature)+1e-5)
+        return logits / (torch.abs(temperature))
 
     def get_only_feat(self, x):
 
