@@ -1,11 +1,9 @@
 --gpus=0
---data=tiny
+--data=cifar100
 --server=main
---normalize
 --n-label-per-class=100
 --n-valid-per-class=50
 --mismatch-ratio=0.60
---for-what=Proposed
---checkpoint-hash=2024-04-09_12-01-49
---normalize
+--for-what=Ablation1
+--checkpoint-hash=2024-04-09_22-50-29
 --seed=1

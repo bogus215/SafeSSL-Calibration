@@ -81,7 +81,7 @@ class Classification(Task):
                                                          lambda_ova_cali=lambda_ova_cali,
                                                          lambda_ova=lambda_ova,
                                                          lambda_fix=lambda_fix,
-                                                         smoothing_ova=None if epoch==1 else ece_ova_results,
+                                                         smoothing_ova=None if epoch<start_fix else ece_ova_results,
                                                          n_bins=n_bins)
 
             eval_history, ece_linear_results, ece_ova_results = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
@@ -206,7 +206,7 @@ class Classification(Task):
                         labeled_confidence = label_ova_logit.view(len(label_ova_logit),2,-1).softmax(1)[:,1,:].max(1)[0].detach()
                         label_confidence_surgery = self.adaptive_smoothing(confidence=labeled_confidence,acc_distribution=smoothing_proposed_surgery,class_num=2)
 
-                        ova_cali_loss = ova_soft_loss_func(self.backbone.scaling_logits(label_ova_logit.detach(), name='ova_cali_scaler'), label_confidence_surgery, label_y)
+                        ova_cali_loss = ova_soft_loss_func(self.backbone.scaling_logits(label_ova_logit, name='ova_cali_scaler'), label_confidence_surgery, label_y)
 
                     fix_loss = torch.tensor(0).cuda(self.local_rank)
 
@@ -333,7 +333,7 @@ class Classification(Task):
         result['ece'][0] = ece_results[0]
 
         train_ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
-        train_ece_results_ova = self.get_ece(preds=unscaled_ova_preds.numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
+        train_ece_results_ova = self.get_ece(preds=ova_preds.numpy(), targets=trues.numpy(), n_bins=train_n_bins, plot=False)
         
         return {k: v.mean().item() for k, v in result.items()}, train_ece_results[1], train_ece_results_ova[1]
 

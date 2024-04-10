@@ -87,7 +87,7 @@ class Classification(Task):
                                                          lambda_ova=lambda_ova,
                                                          lambda_fix=lambda_fix,
 
-                                                         smoothing_linear=None if epoch==1 else ece_linear_results,
+                                                         smoothing_linear=None if epoch<start_fix else ece_linear_results,
 
                                                          n_bins=n_bins)
 
