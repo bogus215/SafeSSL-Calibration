@@ -129,7 +129,7 @@ class WRN(nn.Module):
         temperature = getattr(self,name).unsqueeze(1).expand(logits.size(0), logits.size(1))
         temperature = torch.clip(temperature,max=5,min=0.2)
         
-        return logits / (torch.abs(temperature))
+        return logits / (torch.abs(temperature)+1e-5)
 
     def get_only_feat(self, x):
 
