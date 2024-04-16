@@ -161,6 +161,7 @@ def main_worker(local_rank: int, config: object):
         test_set=test_set,
         open_test_set=open_test_set,
         p_cutoff=config.p_cutoff,
+        pi=config.pi,
         warm_up_end=config.warm_up,
         n_bins=config.n_bins,
         start_fix=config.start_fix,

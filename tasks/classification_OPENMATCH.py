@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from rich.progress import Progress
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import Sampler
 
@@ -25,6 +25,7 @@ class Classification(Task):
             test_set,
             open_test_set,
             p_cutoff,
+            pi,
             warm_up_end,
             save_every,
             n_bins,
@@ -64,7 +65,7 @@ class Classification(Task):
         for epoch in range(1, epochs + 1):
 
             # Selection related to unlabeled data
-            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_fix,current_epoch=epoch,transform=train_trans)
+            self.exclude_dataset(unlabeled_dataset=train_set[1],selected_dataset=train_set[-1],start_fix=start_fix,current_epoch=epoch,pi=pi, p_cutoff=p_cutoff)
             
             # Train & evaluate
             u_sel_sampler = DistributedSampler(dataset=train_set[-1], num_replicas=1, rank=self.local_rank, num_samples=num_samples)
@@ -122,7 +123,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch,transform):
+    def exclude_dataset(self,unlabeled_dataset,selected_dataset,start_fix,current_epoch,pi,p_cutoff):
 
         loader = DataLoader(dataset=unlabeled_dataset,
                             batch_size=128,
@@ -147,16 +148,15 @@ class Classification(Task):
                     logits_open = nn.functional.softmax(logits_open.view(logits_open.size(0), 2, -1), 1)
                     tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
                     pred_close = probs.data.max(1)[1]
-                    unk_score = logits_open[tmp_range, 0, pred_close]
-                    select_idx = unk_score < 0.5
+                    unk_score = logits_open[tmp_range, :, pred_close]
                     gt_idx = y < self.backbone.class_num
                     if batch_idx == 0:
-                        select_all = select_idx
+                        unk_score_all = unk_score
                         gt_all = gt_idx
                         probs_all, logits_all = probs, logits
                         labels_all = y
                     else:
-                        select_all = torch.cat([select_all, select_idx], 0)
+                        unk_score_all = torch.cat([unk_score_all, unk_score], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
                         probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
                         labels_all = torch.cat([labels_all, y], 0)
@@ -166,37 +166,40 @@ class Classification(Task):
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
-        select_accuracy = accuracy_score(gt_all.cpu().numpy(), select_all.cpu().numpy()) # positive : inlier, negative : out of distribution
-        select_precision = precision_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
-        select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+        s_us_confidence, s_us_result = unk_score_all.max(1)
+        select_all = (s_us_result==1)
+                
+        select_accuracy = accuracy_score(gt_all[s_us_confidence>=pi].cpu().numpy(), select_all[s_us_confidence>=pi].cpu().numpy()) # positive : inlier, negative : out of distribution
+        select_f1 = f1_score(gt_all[s_us_confidence>=pi].cpu().numpy(), select_all[s_us_confidence>=pi].cpu().numpy())
 
-        selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
+        selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[(select_all) & (s_us_confidence>=pi)]
 
         # Write TensorBoard summary
         if self.writer is not None:
-            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
             self.writer.add_scalar('Selected accuracy', select_accuracy, global_step=current_epoch)
-            self.writer.add_scalar('Selected precision', select_precision, global_step=current_epoch)
-            self.writer.add_scalar('Selected recall', select_recall, global_step=current_epoch)
+            self.writer.add_scalar('Selected f1', select_f1, global_step=current_epoch)
+            self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
+
             self.writer.add_scalar('In distribution: ECE', self.get_ece(probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy())[0], global_step=current_epoch)
             self.writer.add_scalar('In distribution: ACC', TopKAccuracy(k=1)(logits_all[gt_all],labels_all[gt_all]).item(), global_step=current_epoch)
 
-            if ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
-                self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy(), labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)].cpu().numpy())[0], global_step=current_epoch)
-                self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (probs_all.max(1)[0]>=0.95)], labels_all[(gt_all) & (probs_all.max(1)[0]>=0.95)]).item(), global_step=current_epoch)
-                self.writer.add_scalar('Selected ratio of i.d over conf 0.95', ((gt_all) & (probs_all.max(1)[0]>=0.95)).sum() / gt_all.sum() , global_step=current_epoch)
+            if ((gt_all) & (probs_all.max(1)[0]>=p_cutoff)).sum()>0:
+                idx = (gt_all) & (probs_all.max(1)[0]>=p_cutoff)
+                self.writer.add_scalar('In distribution over conf 0.95: ECE', self.get_ece(probs_all[idx].cpu().numpy(), labels_all[idx].cpu().numpy())[0], global_step=current_epoch)
+                self.writer.add_scalar('In distribution over conf 0.95: ACC', TopKAccuracy(k=1)(logits_all[idx], labels_all[idx]).item(), global_step=current_epoch)
+                self.writer.add_scalar('Selected ratio of i.d over conf 0.95', (idx).sum() / gt_all.sum() , global_step=current_epoch)
 
             if ((gt_all) & (select_all)).sum()>0:
                 self.writer.add_scalar('In distribution under ood score 0.5: ECE', self.get_ece(probs_all[(gt_all) & (select_all)].cpu().numpy(), labels_all[(gt_all) & (select_all)].cpu().numpy())[0], global_step=current_epoch)
                 self.writer.add_scalar('In distribution under ood score 0.5: ACC', TopKAccuracy(k=1)(logits_all[(gt_all) & (select_all)], labels_all[(gt_all) & (select_all)]).item(), global_step=current_epoch)
                 self.writer.add_scalar('Selected ratio of i.d under ood score 0.5', ((gt_all) & (select_all)).sum() / gt_all.sum() , global_step=current_epoch)
 
-            if (probs_all.max(1)[0]>=0.95).sum()>0:
-                self.writer.add_scalar('Seen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
-                self.writer.add_scalar('Unseen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum() / (probs_all.max(1)[0]>=0.95).sum(), global_step=current_epoch)
+            if (probs_all.max(1)[0]>=p_cutoff).sum()>0:
+                self.writer.add_scalar('Seen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=p_cutoff)]<self.backbone.class_num).sum() / (probs_all.max(1)[0]>=p_cutoff).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio over conf 0.95', (labels_all[(probs_all.max(1)[0]>=p_cutoff)]>=self.backbone.class_num).sum() / (probs_all.max(1)[0]>=p_cutoff).sum(), global_step=current_epoch)
 
-                self.writer.add_scalar('Seen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum(), global_step=current_epoch)
-                self.writer.add_scalar('Unseen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Seen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=p_cutoff)]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=p_cutoff)]>=self.backbone.class_num).sum(), global_step=current_epoch)
                 
             if select_all.sum()>0:
                 self.writer.add_scalar('Seen-class ratio under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum() / select_all.sum(), global_step=current_epoch)
@@ -205,12 +208,12 @@ class Classification(Task):
                 self.writer.add_scalar('Seen-class under ood score 0.5', (labels_all[select_all]<self.backbone.class_num).sum(), global_step=current_epoch)
                 self.writer.add_scalar('Unseen-class under ood score 0.5', (labels_all[select_all]>=self.backbone.class_num).sum(), global_step=current_epoch)
 
-            if ((select_all) & (probs_all.max(1)[0]>=0.95)).sum()>0:
-                self.writer.add_scalar('Seen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
-                self.writer.add_scalar('Unseen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=0.95)).sum(), global_step=current_epoch)
+            if ((select_all) & (probs_all.max(1)[0]>=p_cutoff)).sum()>0:
+                self.writer.add_scalar('Seen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=p_cutoff))]<self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=p_cutoff)).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class ratio both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=p_cutoff))]>=self.backbone.class_num).sum() / ((select_all) & (probs_all.max(1)[0]>=p_cutoff)).sum(), global_step=current_epoch)
 
-                self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]<self.backbone.class_num).sum(), global_step=current_epoch)
-                self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=0.95))]>=self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Seen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=p_cutoff))]<self.backbone.class_num).sum(), global_step=current_epoch)
+                self.writer.add_scalar('Unseen-class both under ood score 0.5 and over conf 0.95', (labels_all[((select_all) & (probs_all.max(1)[0]>=p_cutoff))]>=self.backbone.class_num).sum(), global_step=current_epoch)
 
         self._set_learning_phase(train=True)
         if current_epoch >= start_fix:
