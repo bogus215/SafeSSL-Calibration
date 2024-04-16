@@ -127,6 +127,7 @@ def main_worker(local_rank: int, config: object):
         open_test_set=open_test_set,
         mismatch_ratio=config.mismatch_ratio,
         safe_student_T=config.safe_student_T,
+        ova_pi=config.ova_pi,
         logger=logger
     )
     elapsed_sec = time.time() - start

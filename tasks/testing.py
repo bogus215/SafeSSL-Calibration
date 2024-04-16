@@ -10,7 +10,7 @@ from skimage.filters import threshold_otsu
 
 from tasks.base import Task
 from utils.metrics import TopKAccuracy
-from sklearn.metrics import f1_score, roc_auc_score
+from sklearn.metrics import f1_score, roc_auc_score, accuracy_score
 
 
 class Testing(Task):
@@ -61,6 +61,7 @@ class Testing(Task):
             for_what,
             mismatch_ratio,
             safe_student_T,
+            ova_pi,
             open_test_set: torch.utils.data.Dataset = None,
             **kwargs):  # pylint: disable=unused-argument
 
@@ -85,7 +86,7 @@ class Testing(Task):
 
         # Evaluate (Validation)
         if for_what=="Proposed":
-            eval_history = self.proposed_evaluate(open_test_loader)
+            eval_history = self.proposed_evaluate(open_test_loader,ova_pi)
         elif for_what=="SafeStudent":
             eval_history = self.safestudent_evaluate(open_test_loader, mismatch_ratio=mismatch_ratio, safe_student_T=safe_student_T)
         elif for_what=="Ablation1":
@@ -101,7 +102,7 @@ class Testing(Task):
         elif for_what=="IOMATCH":
             eval_history = self.iomatch_evaluate(open_test_loader)
         elif for_what=="OPENMATCH":
-            eval_history = self.openmatch_evaluate(open_test_loader)
+            eval_history = self.openmatch_evaluate(open_test_loader,ova_pi)
         elif for_what in ["FIXMATCH","SL"]:
             eval_history = self.fixmatch_evaluate(open_test_loader)
         elif for_what=="MTC":
@@ -359,7 +360,7 @@ class Testing(Task):
         return {k: v.mean().item() for k, v in result.items()}
 
     @torch.no_grad()
-    def openmatch_evaluate(self, data_loader, **kwargs):
+    def openmatch_evaluate(self, data_loader, ova_pi, **kwargs):
         """Evaluation defined for a single epoch."""
 
         steps = len(data_loader)
@@ -372,6 +373,7 @@ class Testing(Task):
             "AUROC": np.zeros(1),
             "F1-IN": np.zeros(1),
             "F1-OOD": np.zeros(1),
+            "Accuracy": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
             "IN-SEEN-DETECTION-ECE": np.zeros(1),
@@ -424,12 +426,12 @@ class Testing(Task):
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
         
-        result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=out_scores.cpu())
+        ovr_confidence, ovr_results = torch.cat([out_scores.unsqueeze(1),in_scores.unsqueeze(1)],axis=1).max(1)
 
-        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
-        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
-
-        ovr_confidence = torch.max(in_scores,out_scores)
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu()[ovr_confidence>=ova_pi], y_score=out_scores.cpu()[ovr_confidence>=ova_pi])
+        result['F1-IN'][0] = f1_score(y_true=in_label[ovr_confidence>=ova_pi],y_pred=in_pred[ovr_confidence>=ova_pi])
+        result['F1-OOD'][0] = f1_score(y_true=ood_label[ovr_confidence>=ova_pi],y_pred=ood_pred[ovr_confidence>=ova_pi])
+        result['Accuracy'][0] = accuracy_score(y_true=in_label[ovr_confidence>=ova_pi],y_pred=in_pred[ovr_confidence>=ova_pi])
 
         result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ovr_confidence[labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
         result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ovr_confidence[labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
@@ -666,7 +668,7 @@ class Testing(Task):
         return {k: v.mean().item() for k, v in result.items()}
         
     @torch.no_grad()
-    def proposed_evaluate(self, data_loader, **kwargs):
+    def proposed_evaluate(self, data_loader,ova_pi, **kwargs):
         """Evaluation defined for a single epoch."""
 
         steps = len(data_loader)
@@ -679,6 +681,7 @@ class Testing(Task):
             "AUROC": np.zeros(1),
             "F1-IN": np.zeros(1),
             "F1-OOD": np.zeros(1),
+            "Accuracy": np.zeros(1),
             'In distribution over conf 0.95: ECE': np.zeros(1),
             'In distribution under ood score 0.5: ECE': np.zeros(1),
             "IN-SEEN-DETECTION-ECE": np.zeros(1),
@@ -727,10 +730,12 @@ class Testing(Task):
         result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
         result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
         
-        result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=ova_scores[:,0])
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label[ova_scores.max(1)[0]>=ova_pi].cpu(), y_score=ova_scores[ova_scores.max(1)[0]>=ova_pi,0])
 
-        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
-        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
+        result['F1-IN'][0] = f1_score(y_true=in_label[ova_scores.max(1)[0]>=ova_pi],y_pred=in_pred[ova_scores.max(1)[0]>=ova_pi])
+        result['F1-OOD'][0] = f1_score(y_true=ood_label[ova_scores.max(1)[0]>=ova_pi],y_pred=ood_pred[ova_scores.max(1)[0]>=ova_pi])
+
+        result['Accuracy'][0] = accuracy_score(y_true=in_label[ova_scores.max(1)[0]>=ova_pi],y_pred=in_pred[ova_scores.max(1)[0]>=ova_pi])
 
         result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
         result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)

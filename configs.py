@@ -447,6 +447,7 @@ class TestingConfig(ConfigBase):
         parser.add_argument('--for-what', type=str, default= "Proposed", required=True)
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
         parser.add_argument('--safe-student-T', type=float, default=1.5)
+        parser.add_argument('--ova-pi', type=float, default=0.5)
 
         return parser
 
