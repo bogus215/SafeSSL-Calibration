@@ -498,7 +498,7 @@ class SafeStudentConfig(ConfigBase):
         parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
         parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--T', type=float, default=1.5, help="temperature parameter for ED")
+        parser.add_argument('--T', type=float, default=1, help="temperature parameter for ED")
         parser.add_argument('--lambda-one', type=float, default=1.0, help="coefficient for CBE loss")
         parser.add_argument('--lambda-two', type=float, default=0.01, help="coefficient for UCD loss")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
@@ -510,22 +510,3 @@ class SafeStudentConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "SafeStudent"
-
-class WADConfig(ConfigBase):
-    def __init__(self, args=None, **kwargs):
-        super(WADConfig, self).__init__(args, **kwargs)
-
-    @staticmethod
-    def task_specific_parser() -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
-        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
-        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi')) 
-        parser.add_argument('--simclr-dim', help='Dimension of simclr layer',default=128, type=int)
-        parser.add_argument('--sim-lambda', help='Weight for SimCLR loss',default=1.0, type=float)
-        parser.add_argument('--temperature', help='Temperature for similarity',default=0.5, type=float)
-        
-        return parser
-
-    @property
-    def task(self) -> str:
-        return "WAD"
