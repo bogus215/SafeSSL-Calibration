@@ -1,9 +1,9 @@
---gpus=1
+--gpus=0
 --seed=1
 --data=svhn
---server=workstation1
+--server=main
 --n-label-per-class=50
---mismatch-ratio=0.30
+--mismatch-ratio=0.60
 --mixed-precision
 --save-every=5000
 --learning-rate=3e-3

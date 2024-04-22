@@ -6,6 +6,5 @@
 --n-valid-per-class=500
 --mismatch-ratio=0.60
 --for-what=Proposed
---checkpoint-hash=2024-04-05_16-01-50
---normalize
+--checkpoint-hash=2024-04-13_13-53-56
 --seed=2

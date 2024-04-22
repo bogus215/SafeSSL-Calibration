@@ -1,0 +1,8 @@
+--gpus=0
+--data=svhn
+--server=main
+--n-label-per-class=50
+--mismatch-ratio=0.60
+--for-what=Ablation1
+--checkpoint-hash=2024-04-09_04-10-56
+--seed=1
