@@ -438,6 +438,10 @@ class Testing(Task):
         result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ovr_confidence.numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
         result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
+
+        import pickle
+        with open(os.path.join(self.ckpt_dir,'results.pickle'),'wb') as f:
+            pickle.dump({"predicted_label":in_pred.numpy(),"confidences":ovr_confidence.numpy(),"targets":in_label.numpy()},f,protocol=pickle.HIGHEST_PROTOCOL)
         
         return {k: v.mean().item() for k, v in result.items()}
 
