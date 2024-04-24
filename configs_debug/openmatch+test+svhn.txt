@@ -1,0 +1,8 @@
+--gpus=0
+--data=svhn
+--server=main
+--n-label-per-class=50
+--mismatch-ratio=0.6
+--for-what=OPENMATCH
+--checkpoint-hash=2024-03-19_07-39-05
+--seed=5

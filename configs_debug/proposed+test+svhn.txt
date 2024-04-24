@@ -1,8 +1,8 @@
 --gpus=0
 --data=svhn
---server=workstation3
+--server=main
 --n-label-per-class=50
 --mismatch-ratio=0.60
 --for-what=Proposed
---checkpoint-hash=2024-04-09_04-10-56
+--checkpoint-hash=2024-03-11_08-24-24
 --seed=1

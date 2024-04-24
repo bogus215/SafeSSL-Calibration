@@ -5,5 +5,5 @@
 --n-valid-per-class=50
 --mismatch-ratio=0.60
 --for-what=OPENMATCH
---checkpoint-hash=2023-12-07_15-22-45
---seed=1
+--checkpoint-hash=2023-12-28_03-30-36
+--seed=2
