@@ -7,7 +7,7 @@ import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score
 
 from tasks.classification import Classification as Task
 from tasks.classification_OPENMATCH import DistributedSampler
