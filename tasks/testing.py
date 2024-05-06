@@ -441,7 +441,7 @@ class Testing(Task):
 
         import pickle
         with open(os.path.join(self.ckpt_dir,'results.pickle'),'wb') as f:
-            pickle.dump({"predicted_label":in_pred.numpy(),"confidences":ovr_confidence.numpy(),"targets":in_label.numpy()},f,protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump({"predicted_label":in_pred.numpy(),"confidences":ovr_confidence.numpy(),"targets":in_label.numpy(),"selected":((ovr_confidence>=ova_pi) & (labels<logits.size(1))).sum().item()},f,protocol=pickle.HIGHEST_PROTOCOL)
         
         return {k: v.mean().item() for k, v in result.items()}
 
