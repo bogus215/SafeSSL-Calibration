@@ -15,8 +15,8 @@ do
                                     --mismatch-ratio $ratio \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --lambda-ova-cali 0.5 --lambda-ova 0.5 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v20
+                                    --lambda-ova-cali 0.0005 --lambda-ova 0.1 \
+                                    --weight-decay 0 --normalize --wandb-proj-v=-final
 
         echo PROPOSED+CIFAR10, ${CIFAR10_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
@@ -27,7 +27,7 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.1 --lambda-ova 0.1 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v20
+                                    --weight-decay 0 --normalize --wandb-proj-v=-final
 
         echo PROPOSED+TINY, ${TINY_SEEDS[$seed]}, $ratio
         python ./main/run_PROPOSED.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
@@ -37,8 +37,8 @@ do
                                     --mismatch-ratio $ratio \
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
-                                    --lambda-ova-cali 0.5 --lambda-ova 0.5 \
-                                    --weight-decay 0 --normalize --wandb-proj-v=-v20
+                                    --lambda-ova-cali 0.001 --lambda-ova 1 \
+                                    --weight-decay 0 --normalize --wandb-proj-v=-final
 
         python ./main/run_PROPOSED.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
                                     --data svhn --server main --enable-wandb \
@@ -47,6 +47,6 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --lambda-ova-cali 0.5 --lambda-ova 0.5 \
-                                    --weight-decay 0 --wandb-proj-v=-v20
+                                    --weight-decay 0 --wandb-proj-v=-final
     done
 done
