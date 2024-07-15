@@ -510,3 +510,22 @@ class SafeStudentConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "SafeStudent"
+    
+class SOFTMATCHConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(SOFTMATCHConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--dist-da-len', type=int, default=128)
+        parser.add_argument('--n-sigma', type=float, default=2)
+        parser.add_argument('--ema-p', type=float, default=0.999)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "SOFTMATCH"
