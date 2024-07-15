@@ -1,0 +1,11 @@
+--gpus=0
+--seed=2
+--data=cifar10
+--server=main
+--n-label-per-class=400
+--n-valid-per-class=500
+--mismatch-ratio=0.60
+--save-every=5000
+--n-bins=15
+--weight-decay=0
+--batch-size=30
