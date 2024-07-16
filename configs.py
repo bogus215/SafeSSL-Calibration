@@ -529,3 +529,23 @@ class SOFTMATCHConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "SOFTMATCH"
+    
+class FREEMATCHConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(FREEMATCHConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--ema-p', type=float, default=0.999)
+        parser.add_argument('--ent-loss-ratio', type=float, default=0.01)
+        parser.add_argument('--use-quantile', action='store_true')
+        parser.add_argument('--clip-thresh', action='store_true')
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "FREEMATCH"
