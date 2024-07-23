@@ -549,3 +549,26 @@ class FREEMATCHConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "FREEMATCH"
+    
+class SIMMATCHConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(SIMMATCHConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--p-cutoff', type=float, default=0.95)
+        parser.add_argument('--proj-size', type=int, default=128)
+        parser.add_argument('--K', type=int, default=2400)
+        parser.add_argument('--T', type=float, default=0.1)
+        parser.add_argument('--in-loss-ratio', type=float, default=1.0)
+        parser.add_argument('--smoothing-alpha', type=float, default=0.9)
+        parser.add_argument('--da-len', type=float, default=32)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "SIMMATCH"
