@@ -591,3 +591,22 @@ class DEFIXMATCHConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "DEFIXMATCH"
+    
+class REFIXMATCHConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(REFIXMATCHConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--p-cutoff', type=float, default=0.95)
+        parser.add_argument('--T', type=float, default=0.5)
+        parser.add_argument('--consis-coef', type=float, default=.1)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "REFIXMATCH"
