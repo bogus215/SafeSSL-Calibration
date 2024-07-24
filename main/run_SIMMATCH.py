@@ -86,8 +86,8 @@ def main_worker(local_rank: int, config: object):
     import torch.nn as nn
 
     setattr(model,'mlp_proj', nn.Sequential(nn.Linear(model.output.in_features,model.output.in_features),nn.ReLU(),nn.Linear(model.output.in_features,config.proj_size)))
-    setattr(model,'mlp_proj_2', nn.Sequential(nn.Linear(model.output.in_features,model.output.in_features),nn.ReLU(),nn.Linear(model.output.in_features,config.proj_size)))
-    setattr(model,'mlp_proj_3', nn.Sequential(nn.Linear(model.output.in_features,model.output.in_features),nn.ReLU(),nn.Linear(model.output.in_features,config.proj_size)))
+    # setattr(model,'mlp_proj_2', nn.Sequential(nn.Linear(model.output.in_features,model.output.in_features),nn.ReLU(),nn.Linear(model.output.in_features,config.proj_size)))
+    # setattr(model,'mlp_proj_3', nn.Sequential(nn.Linear(model.output.in_features,model.output.in_features),nn.ReLU(),nn.Linear(model.output.in_features,config.proj_size)))
     
     initialize_weights(model)
     

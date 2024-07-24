@@ -286,7 +286,8 @@ class Classification(Task):
     def simmatch_predict(self, x: torch.FloatTensor):
 
         logits, feat = self.get_feature(x)
-        feat_proj = self.l2norm((self.backbone.mlp_proj(feat.squeeze()) + self.backbone.mlp_proj_2(feat.squeeze()) + self.backbone.mlp_proj_3(feat.squeeze()))/3)
+        # feat_proj = self.l2norm((self.backbone.mlp_proj(feat.squeeze()) + self.backbone.mlp_proj_2(feat.squeeze()) + self.backbone.mlp_proj_3(feat.squeeze()))/3)
+        feat_proj = self.l2norm(self.backbone.mlp_proj(feat.squeeze()))
 
         return {'logits': logits,'feat': feat_proj}
 
