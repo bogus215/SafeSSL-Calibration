@@ -7,12 +7,12 @@ import torch
 import torch.nn as nn
 from rich.progress import Progress
 from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score, precision_score, recall_score
 
 from tasks.classification import Classification as Task
 from utils import RandomSampler, TopKAccuracy
 from utils.logging import make_epoch_description
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 class Classification(Task):
     def __init__(self, backbone: nn.Module):
@@ -25,24 +25,14 @@ class Classification(Task):
             open_test_set,
             save_every,
             p_cutoff,
-            K,
             T,
-            in_loss_ratio,
-            smoothing_alpha,
-            da_len,
+            consis_coef,
             warm_up_end,
             n_bins,
             **kwargs):  # pylint: disable=unused-argument
 
         batch_size = self.batch_size
         num_workers = self.num_workers
-        
-        # TODO
-        self.ema_bank, self.K, self.T, self.smoothing_alpha = .7, K, T, smoothing_alpha
-        self.lambda_in = in_loss_ratio
-        self.mem_bank = torch.randn(self.backbone.mlp_proj[-1].out_features, K).to(self.local_rank)
-        self.mem_bank = nn.functional.normalize(self.mem_bank, dim=0)
-        self.labels_bank = torch.zeros(K, dtype=torch.long).to(self.local_rank)
 
         if not self.prepared:
             raise RuntimeError("Training not prepared.")
@@ -77,21 +67,16 @@ class Classification(Task):
         self.warm_up_end = warm_up_end
         self.trained_iteration = 0
 
-        # Distribution Alignment
-        self.da_module = DistAlignQueueHook(num_classes=self.backbone.class_num,
-                                            queue_length=da_len,
-                                            p_target_type='uniform')
+        self.thresholdhook = FixedThresholdingHook(p_cutoff=p_cutoff)
+        self.pseudolabelhook = PseudoLabelingHook(T=T)
 
         for epoch in range(1, epochs + 1):
 
-            self.logging_unlabeled_dataset(unlabeled_dataset=train_set[1],current_epoch=epoch,p_cutoff=p_cutoff)
-            
+            # training unlabeled data logging
+            self.log_unlabeled_data(unlabel_loader=unlabel_loader,current_epoch=epoch)
+
             # Train & evaluate
-            train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator,
-                                                                                             train_u_iterator,
-                                                                                             iteration=save_every,
-                                                                                             p_cutoff=p_cutoff,
-                                                                                             n_bins=n_bins)
+            train_history, cls_wise_results, train_l_iterator, train_u_iterator = self.train(train_l_iterator, train_u_iterator, iteration=save_every, consis_coef=consis_coef, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
             try:
                 if self.ckpt_dir.split("/")[2]=='cifar10' and enable_plot:
@@ -152,7 +137,7 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_iterator, unlabel_iterator, iteration, p_cutoff, n_bins):
+    def train(self, label_iterator, unlabel_iterator, iteration, consis_coef, n_bins):
         """Training defined for a single epoch."""
 
         self._set_learning_phase(train=True)
@@ -183,61 +168,41 @@ class Classification(Task):
                     l_batch = next(label_iterator)
                     u_batch = next(unlabel_iterator)
 
-                    x_lb = l_batch['x'].to(self.local_rank)
+                    x_lb = l_batch['weak_img'].to(self.local_rank)
+                    x_lb_s = l_batch['strong_img'].to(self.local_rank)
                     y_lb = l_batch['y'].to(self.local_rank)
-                    num_lb = y_lb.shape[0]
-                    idx_lb = l_batch['idx'].to(self.local_rank)
-                    
-                    bank = self.mem_bank.clone().detach()
 
                     x_ulb_w, x_ulb_s = u_batch['weak_img'].to(self.local_rank), u_batch['strong_img'].to(self.local_rank)
                     unlabel_y = u_batch['y'].to(self.local_rank)
 
-                    inputs = torch.cat((x_lb, x_ulb_w, x_ulb_s))
-                    outputs = self.simmatch_predict(inputs)
-                    logits, feats = outputs['logits'], outputs['feat']
+                    num_lb = y_lb.shape[0]
 
-                    logits_x_lb, ema_feats_x_lb = logits[:num_lb], feats[:num_lb]
-                    ema_logits_x_ulb_w, logits_x_ulb_s = logits[num_lb:].chunk(2)
-                    ema_feats_x_ulb_w, feats_x_ulb_s = feats[num_lb:].chunk(2)                    
+                    inputs = torch.cat((x_lb, x_lb_s, x_ulb_w, x_ulb_s))
+                    outputs = self.predict(inputs)
+                    logits_x_lb, logits_x_lb_s = outputs[:2*num_lb].chunk(2)
+                    logits_x_ulb_w, logits_x_ulb_s = outputs[2*num_lb:].chunk(2)
 
-                    sup_loss = self.loss_function(logits_x_lb, y_lb.long())
+                    # TODO IS IT FAIR TO TRAIN HARD AUGMENTED LABEL DATA IN SUPERVISED LEARNING?
+                    sup_loss = 0.5*(self.loss_function(logits_x_lb, y_lb.long()) + self.loss_function(logits_x_lb_s, y_lb.long()))
 
-                    with torch.no_grad():
-                        # ema teacher model
-                        ema_probs_x_ulb_w = nn.functional.softmax(ema_logits_x_ulb_w, dim=-1)
-                        ema_probs_x_ulb_w = self.da_module.dist_align(algorithm=None, probs_x_ulb=ema_probs_x_ulb_w.detach())
+                    probs_x_ulb_w = torch.softmax(logits_x_ulb_w.detach(), dim=-1)
+                    probs_x_lb = torch.softmax(logits_x_lb.detach(), dim=-1)
 
-                    # feat_dict = {'x_lb': ema_feats_x_lb, 'x_ulb_w':ema_feats_x_ulb_w, 'x_ulb_s':feats_x_ulb_s}
+                    mask = self.thresholdhook.masking(logits_x_ulb=probs_x_ulb_w, softmax_x_ulb=False)
+                    mask_lb = self.thresholdhook.masking(logits_x_ulb=probs_x_lb, softmax_x_ulb=False)
 
-                    with torch.no_grad():
-                        teacher_logits = ema_feats_x_ulb_w @ bank
-                        teacher_prob_orig = nn.functional.softmax(teacher_logits / self.T, dim=1)
-                        factor = ema_probs_x_ulb_w.gather(1, self.labels_bank.expand([x_ulb_w.size(0), -1]))
-                        teacher_prob = teacher_prob_orig * factor
-                        teacher_prob /= torch.sum(teacher_prob, dim=1, keepdim=True)
+                    # generate unlabeled targets using pseudo label hook
+                    pseudo_label = self.pseudolabelhook.gen_ulb_targets(logits=probs_x_ulb_w,softmax=False)
+                    unsup_loss = (nn.functional.cross_entropy(logits_x_ulb_s, pseudo_label, reduction='none') * (mask)).mean()
 
-                        if self.smoothing_alpha < 1:
-                            bs = teacher_prob_orig.size(0)
-                            aggregated_prob = torch.zeros([bs, self.backbone.class_num], device=teacher_prob_orig.device)
-                            aggregated_prob = aggregated_prob.scatter_add(1, self.labels_bank.expand([bs,-1]) , teacher_prob_orig)
-                            probs_x_ulb_w = ema_probs_x_ulb_w * self.smoothing_alpha + aggregated_prob * (1- self.smoothing_alpha)
-                        else:
-                            probs_x_ulb_w = ema_probs_x_ulb_w
+                    # generate targets for labeled data using pseudo label hook (de-biasing part of the loss)
+                    anti_pseudo_label = self.pseudolabelhook.gen_ulb_targets(probs_x_lb,softmax=False)
+                    
+                    del probs_x_lb
+                    anti_unsup_loss = (nn.functional.cross_entropy(logits_x_lb_s, anti_pseudo_label, reduction='none') * (mask_lb)).mean()
 
-                    student_logits = feats_x_ulb_s @ bank
-                    student_prob = nn.functional.softmax(student_logits / self.T, dim=1)
-                    in_loss = torch.sum(-teacher_prob.detach() * torch.log(student_prob), dim=1).mean()
-
-                    with torch.no_grad():
-                        mask = torch.max(probs_x_ulb_w.detach(), dim=-1)[0].ge(p_cutoff).to(self.local_rank)
-
-                    # unsup_loss = self.consistency_loss(logits_x_ulb_s,probs_x_ulb_w,'ce',mask=mask)
-                    unsup_loss = (torch.sum(-probs_x_ulb_w * nn.functional.log_softmax(logits_x_ulb_s, dim=-1), dim=1) * mask).mean()
-                    warm_up_coef = math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
-
-                    self.update_bank(ema_feats_x_lb, y_lb, idx_lb)
-                    loss = sup_loss + warm_up_coef*(unsup_loss+self.lambda_in * in_loss)
+                    warm_up_coef = consis_coef*math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
+                    loss = sup_loss + warm_up_coef * (unsup_loss - anti_unsup_loss)
 
                 if self.scaler is not None:
                     self.scaler.scale(loss).backward()
@@ -253,8 +218,8 @@ class Classification(Task):
                 result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb, y_lb).detach()
                 result['ece'][i] = self.get_ece(preds=logits_x_lb.softmax(dim=1).detach().cpu().numpy(), targets=y_lb.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 if mask.sum().item() != 0:
-                    result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(ema_logits_x_ulb_w[mask], unlabel_y[mask]).detach()
-                    result['unlabeled_ece'][i] = self.get_ece(preds=ema_logits_x_ulb_w[mask].softmax(dim=1).detach().cpu().numpy(),
+                    result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(logits_x_ulb_w[mask], unlabel_y[mask]).detach()
+                    result['unlabeled_ece'][i] = self.get_ece(preds=logits_x_ulb_w[mask].softmax(dim=1).detach().cpu().numpy(),
                                                               targets=unlabel_y[mask].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                 result['warm_up_coef'][i] = warm_up_coef
                 result["N_used_unlabeled"][i] = mask.sum().item()
@@ -277,69 +242,38 @@ class Classification(Task):
                     self.scheduler.step()
 
         return {k: v.mean().item() for k, v in result.items()}, cls_wise_results, label_iterator, unlabel_iterator
-
-    def l2norm(self, x, power=2):
-        norm = x.pow(power).sum(1, keepdim=True).pow(1. / power)
-        out = x.div(norm)
-        return out
-        
-    def simmatch_predict(self, x: torch.FloatTensor):
-
-        logits, feat = self.get_feature(x)
-        feat_proj = self.l2norm((self.backbone.mlp_proj(feat.squeeze()) + self.backbone.mlp_proj_2(feat.squeeze()) + self.backbone.mlp_proj_3(feat.squeeze()))/3)
-
-        return {'logits': logits,'feat': feat_proj}
-
-    def get_feature(self, x: torch.FloatTensor):
-        """Make a prediction provided a batch of samples."""
-        return self.backbone(x, True)
     
-    @torch.no_grad()
-    def update_bank(self, k, labels, index):
-
-        self.mem_bank[:, index] = nn.functional.normalize(self.ema_bank * self.mem_bank[:, index] + (1 - self.ema_bank) * k.t().detach())
-        self.labels_bank[index] = labels.detach()
-
-    def logging_unlabeled_dataset(self,unlabeled_dataset,current_epoch,p_cutoff):
-
-        loader = DataLoader(dataset=unlabeled_dataset,
-                            batch_size=128,
-                            drop_last=False,
-                            shuffle=False,
-                            num_workers=4)
+    def log_unlabeled_data(self,unlabel_loader,current_epoch):
 
         self._set_learning_phase(train=False)
         
         with torch.no_grad():
             with Progress(transient=True, auto_refresh=False) as pg:
                 if self.local_rank == 0:
-                    task = pg.add_task(f"[bold red] Extracting...", total=len(loader))
-                for batch_idx, data in enumerate(loader):
+                    task = pg.add_task(f"[bold red] Extracting...", total=len(unlabel_loader))
+                for batch_idx, data in enumerate(unlabel_loader):
 
                     x = data['weak_img'].cuda(self.local_rank)
                     y = data['y'].cuda(self.local_rank)
 
-                    outputs = self.simmatch_predict(x)
-
-                    logits_x_ulb_w = outputs['logits']
-
-                    p = nn.functional.softmax(logits_x_ulb_w, dim=-1)
-                    select_idx = p.max(1)[0] > p_cutoff
+                    logits = self.predict(x)
+                    probs = nn.functional.softmax(logits, 1)
+                    select_idx = logits.softmax(1).max(1)[0] > 0.95
                     gt_idx = y < self.backbone.class_num
 
                     if batch_idx == 0:
                         select_all = select_idx
                         gt_all = gt_idx
-                        logits_all = logits_x_ulb_w
+                        probs_all, logits_all = probs, logits
                         labels_all = y
                     else:
                         select_all = torch.cat([select_all, select_idx], 0)
                         gt_all = torch.cat([gt_all, gt_idx], 0)
-                        logits_all = torch.cat([logits_all, logits_x_ulb_w], 0)
+                        probs_all, logits_all = torch.cat([probs_all, probs], 0), torch.cat([logits_all, logits], 0)
                         labels_all = torch.cat([labels_all, y], 0)
                         
                     if self.local_rank == 0:
-                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(loader)}] "
+                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(unlabel_loader)}] "
                         pg.update(task, advance=1., description=desc)
                         pg.refresh()
 
@@ -349,8 +283,6 @@ class Classification(Task):
 
         selected_idx = torch.arange(0, len(select_all),device=self.local_rank)[select_all]
 
-        probs_all = logits_all.softmax(-1)
-        
         # Write TensorBoard summary
         if self.writer is not None:
             self.writer.add_scalar('Selected ratio', len(selected_idx) / len(select_all), global_step=current_epoch)
@@ -371,77 +303,64 @@ class Classification(Task):
 
                 self.writer.add_scalar('Seen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]<self.backbone.class_num).sum(), global_step=current_epoch)
                 self.writer.add_scalar('Unseen-class over conf 0.95', (labels_all[(probs_all.max(1)[0]>=0.95)]>=self.backbone.class_num).sum(), global_step=current_epoch)
+                
 
+class FixedThresholdingHook:
 
-class DistAlignQueueHook:
     """
-    Distribution Alignment Hook for conducting distribution alignment
-    
-    def set_hooks(self):
-        self.register_hook(
-            DistAlignQueueHook(num_classes=self.num_classes, queue_length=self.args.da_len, p_target_type='uniform'),
-            "DistAlignHook")
+    Common Fixed Threshold used in fixmatch, uda, pseudo label, et. al.
     """
-    def __init__(self, num_classes, queue_length=128, p_target_type='uniform', p_target=None):
-        self.num_classes = num_classes
-        self.queue_length = queue_length
+    def __init__(self,p_cutoff):
+        self.p_cutoff = p_cutoff
 
-        # p_target
-        self.p_target_ptr, self.p_target = self.set_p_target(p_target_type, p_target)    
-
-        # p_model
-        self.p_model = torch.zeros(self.queue_length, self.num_classes, dtype=torch.float)
-        self.p_model_ptr = torch.zeros(1, dtype=torch.long)
 
     @torch.no_grad()
-    def dist_align(self, algorithm, probs_x_ulb, probs_x_lb=None):
-
-        # update queue
-        self.update_p(algorithm, probs_x_ulb, probs_x_lb)
-
-        # dist align
-        probs_x_ulb_aligned = probs_x_ulb * (self.p_target.mean(dim=0) + 1e-6) / (self.p_model.mean(dim=0) + 1e-6)
-        probs_x_ulb_aligned = probs_x_ulb_aligned / probs_x_ulb_aligned.sum(dim=-1, keepdim=True)
-        return probs_x_ulb_aligned
-    
-    @torch.no_grad()
-    def update_p(self, algorithm, probs_x_ulb, probs_x_lb):
-        # TODO: think better way?
-        # check device
-        if not self.p_target.is_cuda:
-            self.p_target = self.p_target.to(probs_x_ulb.device)
-            if self.p_target_ptr is not None:
-                self.p_target_ptr = self.p_target_ptr.to(probs_x_ulb.device)
-        
-        if not self.p_model.is_cuda:
-            self.p_model = self.p_model.to(probs_x_ulb.device)
-            self.p_model_ptr = self.p_model_ptr.to(probs_x_ulb.device)
-
-        probs_x_ulb = probs_x_ulb.detach()
-        p_model_ptr = int(self.p_model_ptr)
-        self.p_model[p_model_ptr] = probs_x_ulb.mean(dim=0)
-        self.p_model_ptr[0] = (p_model_ptr + 1) % self.queue_length
-
-        if self.p_target_ptr is not None:
-            assert probs_x_lb is not None
-            p_target_ptr = int(self.p_target_ptr)
-            self.p_target[p_target_ptr] = probs_x_lb.mean(dim=0)
-            self.p_target_ptr[0] = (p_target_ptr + 1) % self.queue_length
-    
-    def set_p_target(self, p_target_type='uniform', p_target=None):
-        assert p_target_type in ['uniform', 'gt', 'model']
-
-        # p_target
-        p_target_ptr = None
-        if p_target_type == 'uniform':
-            p_target = torch.ones(self.queue_length, self.num_classes, dtype=torch.float) / self.num_classes
-        elif p_target_type == 'model':
-            p_target = torch.zeros((self.queue_length, self.num_classes), dtype=torch.float)
-            p_target_ptr = torch.zeros(1, dtype=torch.long)
+    def masking(self, logits_x_ulb, softmax_x_ulb=True, *args, **kwargs):
+        if softmax_x_ulb:
+            probs_x_ulb = torch.softmax(logits_x_ulb.detach(), dim=-1)
         else:
-            assert p_target is not None
-            if isinstance(p_target, np.ndarray):
-                p_target = torch.from_numpy(p_target)
-            p_target = p_target.unsqueeze(0).repeat((self.queue_length, 1))
+            # logits is already probs
+            probs_x_ulb = logits_x_ulb.detach()
+        max_probs, _ = torch.max(probs_x_ulb, dim=-1)
+        mask = max_probs.ge(self.p_cutoff).to(logits_x_ulb.device)
+        return mask
+    
+class PseudoLabelingHook:
+
+    def __init__(self,T,use_hard_label=True,label_smoothing=0):
+        self.T = T
+        self.use_hard_label = use_hard_label
+        self.label_smoothing = label_smoothing
+    
+    @torch.no_grad()
+    def gen_ulb_targets(self, 
+                        logits, 
+                        softmax=True):
         
-        return p_target_ptr, p_target
+        """
+        generate pseudo-labels from logits/probs
+
+        Args:
+            algorithm: base algorithm
+            logits: logits (or probs, need to set softmax to False)
+            use_hard_label: flag of using hard labels instead of soft labels
+            T: temperature parameters
+            softmax: flag of using softmax on logits
+            label_smoothing: label_smoothing parameter
+        """
+
+        logits = logits.detach()
+        if self.use_hard_label:
+            # return hard label directly
+            pseudo_label = torch.argmax(logits, dim=-1)
+            if self.label_smoothing:
+                pseudo_label = smooth_targets(logits, pseudo_label, self.label_smoothing)
+            return pseudo_label
+        
+        # return soft label
+        if softmax:
+            pseudo_label = torch.softmax(logits / self.T, dim=-1)
+        else:
+            # inputs logits converted to probabilities already
+            pseudo_label = logits
+        return pseudo_label
