@@ -322,7 +322,6 @@ class Classification(Task):
                     one_hot_label_y = torch.nn.functional.one_hot(y_lb,self.backbone.class_num)
 
                     l = np.random.beta(self.mixupalpha, self.mixupalpha)
-                    l = max(l, 1-l)
                     idx = torch.randperm(x_lb_w_0.size(0)*2)
 
                     input_a, input_b = torch.cat((x_lb_w_0, x_lb_w_1)), torch.cat((x_lb_w_0, x_lb_w_1))[idx]
