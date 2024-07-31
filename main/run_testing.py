@@ -78,7 +78,7 @@ def main_worker(local_rank: int, config: object):
         setattr(model,'mlp_proj', nn.Sequential(nn.Linear(model.output.in_features,model.output.in_features),nn.ReLU(),nn.Linear(model.output.in_features,model.output.in_features)))
         setattr(model,'mb_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2)))
         setattr(model,'openset_classifier', nn.Linear(model.output.in_features,int(model.class_num+1)))
-    elif config.for_what=='OPENMATCH':
+    elif 'OPENMATCH' in config.for_what:
         setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
     elif config.for_what=='MTC':
         setattr(model,'domain_classifier', nn.Linear(model.output.in_features, 1))

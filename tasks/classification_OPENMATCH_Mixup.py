@@ -295,7 +295,7 @@ class Classification(Task):
         result = {
             'loss': torch.zeros(iteration, device=self.local_rank),
             'top@1': torch.zeros(iteration, device=self.local_rank),
-            'ece': torch.zeros(iteration, device=self.local_rank),
+            # 'ece': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
             'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
             'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank)
@@ -375,7 +375,7 @@ class Classification(Task):
 
                 result['loss'][i] = loss.detach()
                 result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb.chunk(2)[0], y_lb).detach()
-                result['ece'][i] = self.get_ece(preds=logits_x_lb.chunk(2)[0].softmax(dim=1).detach().cpu().numpy(), targets=y_lb.cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                # result['ece'][i] = self.get_ece(preds=logits_x_lb.chunk(2)[0].softmax(dim=1).detach().cpu().numpy(), targets=y_lb.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 if current_epoch >= start_fix:
                     if used_unlabeled_index.sum().item() != 0:
                         result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(logits_x_ulb_w[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()

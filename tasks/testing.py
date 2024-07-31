@@ -101,7 +101,7 @@ class Testing(Task):
             eval_history = self.ablation5_evaluate(open_test_loader)
         elif for_what=="IOMATCH":
             eval_history = self.iomatch_evaluate(open_test_loader)
-        elif for_what=="OPENMATCH":
+        elif "OPENMATCH" in for_what:
             eval_history = self.openmatch_evaluate(open_test_loader,ova_pi)
         elif for_what in ["FIXMATCH","SL"]:
             eval_history = self.fixmatch_evaluate(open_test_loader)
