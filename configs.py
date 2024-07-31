@@ -414,13 +414,35 @@ class OPENMATCHSmoothingConfig(ConfigBase):
         parser.add_argument('--lambda-em', type=float, default=0.1)
         parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
         parser.add_argument('--start-fix', type=int, default=5)
-        parser.add_argument('--alpha', type=float, default=0.01, choices=(0.01, 0.05))
+        parser.add_argument('--alpha', type=float, default=0.01, choices=(0.01, 0.05, 0.005))
 
         return parser
 
     @property
     def task(self) -> str:
         return "OPENMATCH+Smoothing"
+
+class OPENMATCHMMCEConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(OPENMATCHMMCEConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--p-cutoff', type=float, default=0.95)
+        parser.add_argument('--pi', type=float, default=0.5)
+        parser.add_argument('--lambda-em', type=float, default=0.1)
+        parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
+        parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--lambda-mmce', type=float, default=9)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "OPENMATCH+MMCE"
     
 class PseudoLabelConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
