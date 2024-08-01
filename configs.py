@@ -245,6 +245,34 @@ class ProposedConfig(ConfigBase):
     def task(self) -> str:
         return "Proposed"
 
+class ProposedPlusConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(ProposedPlusConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+
+        parser.add_argument('--tau', type=float, default=0.95)
+
+        parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
+        parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
+        parser.add_argument('--start-fix', type=int, default=5)
+
+        parser.add_argument('--lambda-cali', type=float, default=1)
+        parser.add_argument('--lambda-ova-soft', type=float, default=5e-1)
+        parser.add_argument('--lambda-ova-cali', type=float, default=5e-1)
+        parser.add_argument('--lambda-ova', type=float, default=5e-1)
+        parser.add_argument('--lambda-fix', type=float, default=1)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "ProposedPlus"
+    
 class Ablation1Config(ConfigBase):
     def __init__(self, args=None, **kwargs):
         super(Ablation1Config, self).__init__(args, **kwargs)
