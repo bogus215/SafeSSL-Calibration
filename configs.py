@@ -420,7 +420,7 @@ class OPENMATCHMixupConfig(ConfigBase):
         parser.add_argument('--lambda-em', type=float, default=0.1)
         parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
         parser.add_argument('--start-fix', type=int, default=5)
-        parser.add_argument('--alpha', type=float, default=0.75)
+        parser.add_argument('--alpha', type=float, default=0.2)
 
         return parser
 

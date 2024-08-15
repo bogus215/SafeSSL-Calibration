@@ -100,7 +100,12 @@ class Classification(Task):
 
                                                          n_bins=n_bins)
 
-            eval_history, ece_linear_results, ece_ova_results, adaptive_pi = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
+            eval_history, ece_linear_results, ece_ova_results, temp_pi = self.evaluate(eval_loader, n_bins=n_bins, train_n_bins=train_n_bins)
+            if epoch == 1:
+                adaptive_pi = temp_pi
+            else:
+                adaptive_pi = adaptive_pi*0.5 + temp_pi*0.5
+
             try:
                 if self.ckpt_dir.split("/")[2] in ['cifar10','svhn'] and enable_plot:
                     label_preds, label_trues, label_FEATURE, label_CLS_LOSS, label_IDX = self.log_plot_history(data_loader=label_loader, time=self.trained_iteration, name="label", return_results=True)
