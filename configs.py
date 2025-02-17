@@ -112,7 +112,7 @@ class ConfigBase(object):
         """Returns an `argparse.ArgumentParser` instance containing data-related arguments."""
         parser = argparse.ArgumentParser("Data", add_help=False)
         parser.add_argument('--root', type=str, default='./datasets')
-        parser.add_argument('--data', type=str, default='cifar10', choices=('cifar10', 'cifar100', 'tiny','svhn'))
+        parser.add_argument('--data', type=str, default='cifar10', choices=('cifar10', 'cifar100', 'tiny','svhn','imagenet'))
         parser.add_argument('--mismatch-ratio', type=float, default=0.30)
         parser.add_argument('--n-label-per-class', type=int, default=400)
         parser.add_argument('--n-valid-per-class', type=int, default=None , help = '10%')
@@ -128,7 +128,7 @@ class ConfigBase(object):
     def model_parser() -> argparse.ArgumentParser:
         """Returns an `argparse.ArgumentParser` instance containing model-related arguments."""
         parser = argparse.ArgumentParser("CNN Backbone", add_help=False)
-        parser.add_argument('--backbone-type', type=str, default='wide28_2', choices=('wide28_2', 'wide28_10' ,'densenet121', "vgg16_bn", "inceptionv4"))
+        parser.add_argument('--backbone-type', type=str, default='wide28_2', choices=('wide28_2', 'wide28_10' ,'densenet121', "vgg16_bn", "inceptionv4", "resnet50"))
         parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint file to resume training from.')
         return parser
 
