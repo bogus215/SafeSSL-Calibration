@@ -1,18 +1,22 @@
 import os
 import sys
-import time
-
+import time, datetime
 import numpy as np
 import rich
 import torch
+import torch.multiprocessing as mp
+import torch.distributed as dist
 
 sys.path.append("./")
 from configs import FIXMATCHConfig
+
 from datasets.cifar import CIFAR, load_CIFAR, CIFAR_STRONG
 from datasets.tiny import TinyImageNet, load_tiny, TinyImageNet_STRONG
 from datasets.svhn import SVHN, load_SVHN, SVHN_STRONG
+from datasets.imagenet import load_imagenet
 from datasets.transforms import SemiAugment, TestAugment
-from models import WRN, densenet121, vgg16_bn, inceptionv4
+
+from models import WRN, densenet121, vgg16_bn, inceptionv4, ResNet50
 from tasks.classification_FIXMATCH import Classification
 from utils.logging import get_rich_logger
 from utils.wandb import configure_wandb
@@ -23,6 +27,7 @@ NUM_CLASSES = {
     'cifar100': 50,
     'svhn': 6,
     'tiny': 100,
+    'imagenet': 500,
 }
 
 AUGMENTS = {
@@ -36,6 +41,12 @@ def main():
 
     config = FIXMATCHConfig.parse_arguments()
     set_gpu(config)
+    num_gpus_per_node = len(config.gpus)
+    world_size = config.num_nodes * num_gpus_per_node
+    distributed = world_size > 1
+    setattr(config, 'num_gpus_per_node', num_gpus_per_node)
+    setattr(config, 'world_size', world_size)
+    setattr(config, 'distributed', distributed)
 
     rich.print(config.__dict__)
     config.save()
@@ -45,13 +56,33 @@ def main():
     torch.backends.cudnn.deterministic = False
     torch.backends.cudnn.benchmark = True
 
-    rich.print("Single GPU training.")
+    if config.distributed:
+        rich.print(f"Distributed training on {world_size} GPUs.")
+        mp.spawn(
+            main_worker,
+            nprocs=config.num_gpus_per_node,
+            args=(config, )
+        )
+    else:
+        rich.print("Single GPU training.")
     main_worker(0, config=config)  # single machine, single gpu
 
 def main_worker(local_rank: int, config: object):
     """Single process."""
 
     torch.cuda.set_device(local_rank)
+    if config.distributed:
+        dist_rank = config.node_rank * config.num_gpus_per_node + local_rank
+        dist.init_process_group(
+            backend=config.dist_backend,
+            init_method=config.dist_url,
+            world_size=config.world_size,
+            rank=dist_rank
+        )
+
+    config.batch_size = config.batch_size // config.world_size
+    config.num_workers = config.num_workers // config.num_gpus_per_node
+
     num_classes = NUM_CLASSES[config.data]
 
     # Networks
@@ -63,6 +94,8 @@ def main_worker(local_rank: int, config: object):
         model = vgg16_bn(num_class=num_classes)
     elif config.backbone_type == 'inceptionv4':
         model = inceptionv4(class_nums=num_classes)
+    elif config.backbone_type == 'resnet50':
+        model = ResNet50(num_classes=num_classes)
     else:
         raise NotImplementedError
 
@@ -114,18 +147,46 @@ def main_worker(local_rank: int, config: object):
         test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
         open_test_set = SVHN(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
     
+    elif config.data == 'imagenet':
+        
+        datasets, _, trainset, testset = load_imagenet(root=config.root, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio, random_state=config.seed, logger=logger)
+
+        from ffcv.writer import DatasetWriter
+        from ffcv.fields import IntField, RGBImageField
+        from torch.utils.data import Subset
+        
+        for mode in ['l_train','u_train','validation']:
+            ffcv_file_path = os.path.join(config.root,'full-imagenet','train',f'{mode}.ffcv')
+            if not os.path.exists(ffcv_file_path):
+                writer = DatasetWriter(ffcv_file_path,{'image': RGBImageField(write_mode="proportion",max_resolution=500,compress_probability=0.5,jpeg_quality=90),'label': IntField()}, num_workers=config.num_workers)
+                writer.from_indexed_dataset(Subset(trainset, datasets[mode]['images']), chunksize=100)
+
+        for mode in ['test','test_total']:
+            ffcv_file_path = os.path.join(config.root,'full-imagenet','val',f'{mode}.ffcv')
+            if not os.path.exists(ffcv_file_path):
+                writer = DatasetWriter(ffcv_file_path,{'image': RGBImageField(write_mode="proportion",max_resolution=500,compress_probability=0.5,jpeg_quality=90),'label': IntField()}, num_workers=config.num_workers)
+                writer.from_indexed_dataset(Subset(testset, datasets[mode]['images']), chunksize=100)
+
+        labeled_set = os.path.join(config.root,'full-imagenet','train','l_train.ffcv')
+        unlabeled_set = os.path.join(config.root,'full-imagenet','train','u_train.ffcv')
+        eval_set = os.path.join(config.root,'full-imagenet','train','validation.ffcv')
+        test_set = os.path.join(config.root,'full-imagenet','val','test.ffcv')
+        open_test_set = os.path.join(config.root,'full-imagenet','val','test_total.ffcv')
+        
+        from tasks.classification_FIXMATCH import ImageNetClassification
+
     else:
         raise NotImplementedError
 
     if local_rank == 0:
         logger.info(f'Data: {config.data}')
-        logger.info(f'Labeled Data Observations: {len(labeled_set):,}')
-        logger.info(f'Unlabeled Data Observations: {len(unlabeled_set):,}')
+        logger.info(f"Labeled Data Observations: {len(datasets['l_train']['labels']):,}")
+        logger.info(f"Unlabeled Data Observations: {len(datasets['u_train']['labels']):,}")
         logger.info(f'Backbone: {config.backbone_type}')
         logger.info(f'Checkpoint directory: {config.checkpoint_dir}')
 
     # Model (Task)
-    model = Classification(backbone=model)
+    model = Classification(backbone=model) if config.data != 'imagenet' else ImageNetClassification(backbone=model)
     model.prepare(
         ckpt_dir=config.checkpoint_dir,
         optimizer=config.optimizer,
@@ -153,6 +214,7 @@ def main_worker(local_rank: int, config: object):
         warm_up_end=config.warm_up,
         n_bins=config.n_bins,
         enable_plot=config.enable_plot,
+        distributed=config.distributed,
         logger=logger
     )
     elapsed_sec = time.time() - start
@@ -161,6 +223,16 @@ def main_worker(local_rank: int, config: object):
         elapsed_mins = elapsed_sec / 60
         logger.info(f'Total training time: {elapsed_mins:,.2f} minutes.')
         logger.handlers.clear()
+
+    if config.distributed:
+        if dist.is_initialized():
+            try:
+                dist.barrier(timeout=datetime.timedelta(seconds=300))
+            except Exception as e:
+                print(f"[WARNING] dist.barrier() timed out: {e}")
+
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
 if __name__ == '__main__':
 
