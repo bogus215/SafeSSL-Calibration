@@ -1,13 +1,11 @@
 import os
 
-STR2GPU = {     "0" : "MIG-f3304720-4601-5894-bee4-cd0174024e06",
-                "1" : "MIG-35d812cd-2b57-5e55-bb30-890bd9675846",
-                "2" : "MIG-f166d6fd-d51b-5e97-bbd0-99028db1cd2d",
-                "3" : "MIG-d592d9d5-7cd0-5220-8695-37ba249d0084",
-                "4" : "MIG-dc45e153-fb1e-5b2d-8a31-d3fb9494cd80",
-                "5" : "MIG-21d343f4-de6e-5d44-9774-e2f3dbab968d",
-                "6" : "MIG-0b2452d4-9b27-530f-a6f1-1c2d05dfaa72",
-                "7" : "MIG-e46a8085-268f-5417-8e5a-a9e20578424d"}
+STR2GPU = {     "0" : "GPU-7e5f8113-893b-23c8-cd67-101eea2f8eea",
+                "1" : "GPU-5fd619b1-1513-c518-8152-a8c4e6ea3ce5",
+                "2" : "GPU-1ed439f1-d754-f2fc-4f36-f4e1e25ead56",
+                "3" : "GPU-ff1babc7-5657-2e71-1a07-a9558d82a9e0",
+                "4" : "GPU-edefb71f-8316-c832-8331-94667e51a510",
+                }
 
 def set_gpu(config):
     if config.server == 'workstation2':
