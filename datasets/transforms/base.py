@@ -34,6 +34,7 @@ class ImageAugment(object):
         'cifar100':     [True, True, True, True, True, False],
         'svhn':         [True, False, True, True, True, False],
         'tiny':     [True, True, True, True, True, False],
+        'imagenet': [True, True, True, True, True, False],
     }
 
     def __init__(self,
