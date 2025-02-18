@@ -65,7 +65,7 @@ def main():
         )
     else:
         rich.print("Single GPU training.")
-    main_worker(0, config=config)  # single machine, single gpu
+        main_worker(0, config=config)  # single machine, single gpu
 
 def main_worker(local_rank: int, config: object):
     """Single process."""
