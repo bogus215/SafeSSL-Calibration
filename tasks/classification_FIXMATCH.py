@@ -309,12 +309,13 @@ class ImageNetClassification(Classification):
         distributed = kwargs.get('distributed')
         
         from ffcv.loader import Loader, OrderOption
-        from ffcv.transforms import ToTensor, ToDevice, ToTorchImage, NormalizeImage, Squeeze, RandomHorizontalFlip, RandomBrightness, RandomContrast, RandomSaturation, RandomTranslate, Cutout
+        from ffcv.transforms import ToTensor, ToDevice, ToTorchImage, NormalizeImage, Squeeze, RandomHorizontalFlip, Cutout, Convert
         from ffcv.fields.decoders import IntDecoder, RandomResizedCropRGBImageDecoder, CenterCropRGBImageDecoder
+        from torchvision.transforms import AutoAugment, Normalize
         
         label_pipeline = [IntDecoder(), ToTensor(), Squeeze(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True)]
         img_pipeline_weak = [RandomResizedCropRGBImageDecoder((192, 192)), RandomHorizontalFlip(), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
-        img_pipeline_strong = [RandomResizedCropRGBImageDecoder((192, 192)), RandomHorizontalFlip(), RandomBrightness(magnitude=0.3,p=.25), RandomContrast(magnitude=0.3,p=.25), RandomSaturation(magnitude=0.3,p=.25), RandomTranslate(int(224*0.3)), Cutout(crop_size=50,fill=127), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD,np.float16)]
+        img_pipeline_strong = [RandomResizedCropRGBImageDecoder((192, 192)), RandomHorizontalFlip(), ToTensor(), ToTorchImage(channels_last=False), AutoAugment(), Convert(torch.float16), Normalize(IMAGENET_MEAN,IMAGENET_STD), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True)]
         img_pipeline_eval = [CenterCropRGBImageDecoder((224, 224),DEFAULT_CROP_RATIO), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
 
         # DataLoader (train, val, test)
