@@ -309,13 +309,12 @@ class ImageNetClassification(Classification):
         distributed = kwargs.get('distributed')
         
         from ffcv.loader import Loader, OrderOption
-        from ffcv.transforms import ToTensor, ToDevice, ToTorchImage, NormalizeImage, Squeeze, RandomHorizontalFlip, Cutout, Convert
+        from ffcv.transforms import ToTensor, ToDevice, ToTorchImage, NormalizeImage, Squeeze, RandomHorizontalFlip, RandomColorJitter, RandomGrayscale, RandomSolarization, Cutout
         from ffcv.fields.decoders import IntDecoder, RandomResizedCropRGBImageDecoder, CenterCropRGBImageDecoder
-        from torchvision.transforms import AutoAugment, Normalize
         
         label_pipeline = [IntDecoder(), ToTensor(), Squeeze(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True)]
         img_pipeline_weak = [RandomResizedCropRGBImageDecoder((192, 192)), RandomHorizontalFlip(), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
-        img_pipeline_strong = [RandomResizedCropRGBImageDecoder((192, 192)), RandomHorizontalFlip(), ToTensor(), ToTorchImage(channels_last=False), AutoAugment(), Convert(torch.float16), Normalize(IMAGENET_MEAN,IMAGENET_STD), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True)]
+        img_pipeline_strong = [RandomResizedCropRGBImageDecoder((192, 192)), RandomHorizontalFlip(), RandomColorJitter(0.8,0.4,0.4,0.2,0.1), RandomGrayscale(0.2), RandomSolarization(0.2,128), Cutout(crop_size=50), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
         img_pipeline_eval = [CenterCropRGBImageDecoder((224, 224),DEFAULT_CROP_RATIO), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
 
         # DataLoader (train, val, test)
@@ -326,6 +325,9 @@ class ImageNetClassification(Classification):
 
         # Logging
         logger = kwargs.get('logger', None)
+
+        # Start fix
+        start_fix = kwargs.get("start_fix",100)
 
         # Supervised training
         best_eval_acc = -float('inf')
@@ -342,7 +344,7 @@ class ImageNetClassification(Classification):
         for epoch in range(1, epochs + 1):
 
             # Train & evaluate
-            train_history, cls_wise_results = self.train(label_loader, unlabel_loader, tau=tau, consis_coef=consis_coef, n_bins=n_bins)
+            train_history, cls_wise_results = self.train(label_loader, unlabel_loader, start_fix=start_fix, epoch=epoch, tau=tau, consis_coef=consis_coef, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
 
             epoch_history = collections.defaultdict(dict)
@@ -396,7 +398,7 @@ class ImageNetClassification(Classification):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, tau, consis_coef, n_bins):
+    def train(self, label_loader, unlabel_loader, start_fix, epoch, tau, consis_coef, n_bins):
         """Training defined for a single epoch."""
 
         self._set_learning_phase(train=True)
@@ -443,7 +445,10 @@ class ImageNetClassification(Classification):
 
                     label_loss = self.loss_function(label_logit, label_y)
                     used_unlabeled_index = (unlabel_confidence>tau)
-                    if used_unlabeled_index.sum().item() == 0:
+                    
+                    if epoch < start_fix:
+                        unlabel_loss = torch.zeros(1).to(self.local_rank)
+                    elif used_unlabeled_index.sum().item() == 0:
                         unlabel_loss = torch.zeros(1).to(self.local_rank)
                     else:
                         unlabel_loss = self.loss_function(unlabel_strong_logit[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
