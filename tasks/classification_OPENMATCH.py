@@ -545,8 +545,9 @@ class ImageNetClassification(Classification):
                 for k, v in epoch_history.items():
                     for k_, v_ in v.items():
                         self.writer.add_scalar(f'{k}_{k_}', v_, global_step=epoch)
-                self.writer.add_scalar("trained_unlabeled_data_in", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key<500]).item() , global_step=epoch)
-                self.writer.add_scalar("trained_unlabeled_data_ood", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key>=500]).item() , global_step=epoch)
+                if cls_wise_results is not None:
+                    self.writer.add_scalar("trained_unlabeled_data_in", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key<500]).item() , global_step=epoch)
+                    self.writer.add_scalar("trained_unlabeled_data_ood", sum([cls_wise_results[key].mean() for key in cls_wise_results.keys() if key>=500]).item() , global_step=epoch)
 
             # Save best model checkpoint and Logging
             eval_acc = eval_history['top@1']
@@ -665,6 +666,7 @@ class ImageNetClassification(Classification):
                 result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb, y_lb).item()
                 result['top@5'][i] = TopKAccuracy(k=5)(logits_x_lb, y_lb).item()
                 result['ece'][i] = self.get_ece(preds=logits_x_lb.softmax(dim=1).detach().cpu().numpy(), targets=y_lb.cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                result['warm_up_lr'][i] = warm_up_lr
                 if current_epoch >= start_fix:
                     if used_unlabeled_index.sum().item() != 0:
                         result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(logits_x_ulb_w[used_unlabeled_index], unlabel_y[used_unlabeled_index]).item()
@@ -672,7 +674,6 @@ class ImageNetClassification(Classification):
                         result['unlabeled_ece'][i] = self.get_ece(preds=logits_x_ulb_w[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
                                                                 targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                     result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
-                    result['warm_up_lr'][i] = warm_up_lr
                     
                     unique, counts = np.unique(unlabel_y[used_unlabeled_index].cpu().numpy(), return_counts = True)
                     uniq_cnt_dict = dict(zip(unique, counts))
@@ -687,7 +688,10 @@ class ImageNetClassification(Classification):
                     pg.update(task, advance=1., description=desc)
                     pg.refresh()
 
-        return {k: v.mean().item() for k, v in result.items()}, cls_wise_results
+        if current_epoch >= start_fix:
+            return {k: v.mean().item() for k, v in result.items()}, cls_wise_results
+        else:
+            return {k: v.mean().item() for k, v in result.items()}, None
 
     @torch.no_grad()
     def evaluate(self, data_loader, n_bins):
