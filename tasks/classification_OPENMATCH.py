@@ -595,7 +595,6 @@ class ImageNetClassification(Classification):
             'unlabeled_top@1': torch.zeros(iteration),
             'unlabeled_top@5': torch.zeros(iteration),
             'unlabeled_ece': torch.zeros(iteration),
-            'warm_up_coef': torch.zeros(iteration),
             'warm_up_lr': torch.zeros(iteration),
             'N_used_unlabeled': torch.zeros(iteration)
         }
@@ -673,7 +672,8 @@ class ImageNetClassification(Classification):
                         result['unlabeled_ece'][i] = self.get_ece(preds=logits_x_ulb_w[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
                                                                 targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                     result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
-
+                    result['warm_up_lr'][i] = warm_up_lr
+                    
                     unique, counts = np.unique(unlabel_y[used_unlabeled_index].cpu().numpy(), return_counts = True)
                     uniq_cnt_dict = dict(zip(unique, counts))
                     
@@ -688,6 +688,53 @@ class ImageNetClassification(Classification):
                     pg.refresh()
 
         return {k: v.mean().item() for k, v in result.items()}, cls_wise_results
+
+    @torch.no_grad()
+    def evaluate(self, data_loader, n_bins):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+        result = {
+            'loss': torch.zeros(steps),
+            'top@1': torch.zeros(1),
+            'top@5': torch.zeros(1),
+            'ece': torch.zeros(1)
+        }
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Evaluating...", total=steps)
+
+            pred,true = [],[]
+            for i, batch in enumerate(data_loader):
+
+                x, y = batch[0], batch[1]
+
+                with torch.autocast('cuda', enabled = self.mixed_precision):
+                    logits = self.predict(x)
+                    loss = self.loss_function(logits, y.long())
+
+                result['loss'][i] = loss.item()
+                true.append(y.cpu())
+                pred.append(logits.cpu())
+                
+                if self.local_rank == 0:
+                    desc = f"[bold green] [{i+1}/{steps}]: " + f" loss : {result['loss'][:i+1].mean():.4f} |" + f" top@1 : {TopKAccuracy(k=1)(logits, y).detach():.4f} |"
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        # preds, pred are logit vectors
+        preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
+        result['top@1'][0] = TopKAccuracy(k=1)(preds, trues).item()
+        result['top@5'][0] = TopKAccuracy(k=5)(preds, trues).item()
+
+        ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=n_bins, plot=False)
+        result['ece'][0] = ece_results[0]
+
+        return {k: v.mean().item() for k, v in result.items()}
+
         
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406]) * 255
 IMAGENET_STD = np.array([0.229, 0.224, 0.225]) * 255
