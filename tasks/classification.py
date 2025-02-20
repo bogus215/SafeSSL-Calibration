@@ -558,7 +558,6 @@ class ImageNetClassification(Classification):
 
         # DataLoader (train, val, test)
         label_loader = Loader(train_set[0],batch_size=batch_size//4,order=OrderOption.RANDOM,num_workers=num_workers,drop_last=False,distributed=distributed,pipelines={'image':img_pipeline_weak,'label':label_pipeline})
-        unlabel_loader = Loader(train_set[1],batch_size=batch_size,order=OrderOption.RANDOM,num_workers=num_workers,drop_last=False,distributed=distributed,pipelines={'image':img_pipeline_weak,'label':label_pipeline})
         eval_loader = Loader(eval_set,batch_size=batch_size,order=OrderOption.SEQUENTIAL,num_workers=num_workers,drop_last=False,distributed=distributed,pipelines={'image':img_pipeline_eval,'label':label_pipeline})
         test_loader = Loader(test_set,batch_size=batch_size,order=OrderOption.SEQUENTIAL,num_workers=num_workers,drop_last=False,distributed=distributed,pipelines={'image':img_pipeline_eval,'label':label_pipeline})
         
@@ -570,7 +569,7 @@ class ImageNetClassification(Classification):
         best_epoch    = 0
 
         epochs = self.iterations // save_every
-        self.warm_up_end = (kwargs.get("warm_up") // save_every) * len(unlabel_loader)
+        self.warm_up_end = (kwargs.get("warm_up") // save_every) * len(label_loader)
         self.trained_iteration = 0
 
         import torchlars
@@ -580,7 +579,7 @@ class ImageNetClassification(Classification):
         for epoch in range(1, epochs + 1):
 
             # Train & evaluate
-            train_history = self.train(label_loader, unlabel_loader, n_bins=n_bins)
+            train_history = self.train(label_loader, n_bins=n_bins)
             eval_history = self.evaluate(eval_loader, n_bins)
 
             epoch_history = collections.defaultdict(dict)
@@ -632,37 +631,29 @@ class ImageNetClassification(Classification):
             if logger is not None:
                 logger.info(log)
 
-    def train(self, label_loader, unlabel_loader, n_bins):
+    def train(self, label_loader, n_bins):
         """Training defined for a single epoch."""
 
         self._set_learning_phase(train=True)
-        iteration=len(unlabel_loader)
+        iteration=len(label_loader)
         result = {
-            'loss': torch.zeros(iteration, device=self.local_rank),
-            'top@1': torch.zeros(iteration, device=self.local_rank),
-            'top@5': torch.zeros(iteration, device=self.local_rank),
-            'ece': torch.zeros(iteration, device=self.local_rank),
-            'warm_up_lr': torch.zeros(iteration, device=self.local_rank)
+            'loss': torch.zeros(iteration),
+            'top@1': torch.zeros(iteration),
+            'top@5': torch.zeros(iteration),
+            'ece': torch.zeros(iteration),
+            'warm_up_lr': torch.zeros(iteration)
         }
-
-        label_iterator = iter(label_loader)
 
         with Progress(transient=True, auto_refresh=False) as pg:
             if self.local_rank == 0:
                 task = pg.add_task(f"[bold red] Training...", total=iteration)
 
-            for i in range(iteration):
+            for i, (label_x, label_y) in enumerate(label_loader):
 
                 warm_up_lr = self.learning_rate*math.exp(-5 * (1 - min(self.trained_iteration/self.warm_up_end, 1))**2)
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = warm_up_lr
-                try:
-                    l_batch = next(label_iterator)
-                except:
-                    label_iterator = iter(label_loader)
-                    l_batch = next(label_iterator)
 
-                label_x, label_y = l_batch[0], l_batch[1]
                 with torch.autocast('cuda', enabled = self.mixed_precision):
 
                     logits = self.predict(label_x)
@@ -678,9 +669,9 @@ class ImageNetClassification(Classification):
                 self.optimizer.zero_grad()
                 self.trained_iteration+=1
 
-                result['loss'][i] = loss.detach()
-                result['top@1'][i] = TopKAccuracy(k=1)(logits, label_y).detach()
-                result['top@5'][i] = TopKAccuracy(k=5)(logits, label_y).detach()
+                result['loss'][i] = loss.item()
+                result['top@1'][i] = TopKAccuracy(k=1)(logits, label_y).item()
+                result['top@5'][i] = TopKAccuracy(k=5)(logits, label_y).item()
                 result['ece'][i] = self.get_ece(preds=logits.softmax(dim=1).detach().cpu().numpy(), targets=label_y.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 result['warm_up_lr'][i] = warm_up_lr
 
