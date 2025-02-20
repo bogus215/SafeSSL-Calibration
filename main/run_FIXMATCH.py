@@ -1,6 +1,6 @@
 import os
 import sys
-import time, datetime
+import time
 import numpy as np
 import rich
 import torch
@@ -228,7 +228,7 @@ def main_worker(local_rank: int, config: object):
     if config.distributed:
         if dist.is_initialized():
             try:
-                dist.barrier(timeout=datetime.timedelta(seconds=300))
+                dist.barrier()
             except Exception as e:
                 print(f"[WARNING] dist.barrier() timed out: {e}")
 

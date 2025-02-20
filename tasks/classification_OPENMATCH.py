@@ -500,10 +500,8 @@ class ImageNetClassification(Classification):
         from ffcv.fields.decoders import IntDecoder, RandomResizedCropRGBImageDecoder, CenterCropRGBImageDecoder
         
         label_pipeline = [IntDecoder(), ToTensor(), Squeeze(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True)]
-
         img_pipeline_weak = [RandomResizedCropRGBImageDecoder((192, 192)), RandomHorizontalFlip(), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
         img_pipeline_strong = [RandomResizedCropRGBImageDecoder((192, 192)), RandomHorizontalFlip(), RandomColorJitter(0.8,0.4,0.4,0.2,0.1), RandomGrayscale(0.2), RandomSolarization(0.2,128), Cutout(crop_size=50), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
-
         img_pipeline_eval = [CenterCropRGBImageDecoder((224, 224),DEFAULT_CROP_RATIO), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
 
         # DataLoader (train, val, test)
@@ -590,16 +588,16 @@ class ImageNetClassification(Classification):
         self._set_learning_phase(train=True)
         iteration=len(unlabel_loader)
         result = {
-            'loss': torch.zeros(iteration, device=self.local_rank),
-            'top@1': torch.zeros(iteration, device=self.local_rank),
-            'top@5': torch.zeros(iteration, device=self.local_rank),
-            'ece': torch.zeros(iteration, device=self.local_rank),
-            'unlabeled_top@1': torch.zeros(iteration, device=self.local_rank),
-            'unlabeled_top@5': torch.zeros(iteration, device=self.local_rank),
-            'unlabeled_ece': torch.zeros(iteration, device=self.local_rank),
-            'warm_up_coef': torch.zeros(iteration, device=self.local_rank),
-            'warm_up_lr': torch.zeros(iteration, device=self.local_rank),
-            'N_used_unlabeled': torch.zeros(iteration, device=self.local_rank)
+            'loss': torch.zeros(iteration),
+            'top@1': torch.zeros(iteration),
+            'top@5': torch.zeros(iteration),
+            'ece': torch.zeros(iteration),
+            'unlabeled_top@1': torch.zeros(iteration),
+            'unlabeled_top@5': torch.zeros(iteration),
+            'unlabeled_ece': torch.zeros(iteration),
+            'warm_up_coef': torch.zeros(iteration),
+            'warm_up_lr': torch.zeros(iteration),
+            'N_used_unlabeled': torch.zeros(iteration)
         }
         
         label_iterator = iter(label_loader)
@@ -642,17 +640,15 @@ class ImageNetClassification(Classification):
                     fix_loss = torch.tensor(0).cuda(self.local_rank)
                     if current_epoch >= start_fix:
 
-                        logits_x_ulb_w, _ = outputs['logits'][num_lb:].chunk(2)
-                        logits_x_ulb_s = self.openmatch_predict(x_ulb_s)['logits']
-
-                        unlabel_confidence, unlabel_pseudo_y = logits_x_ulb_w.softmax(1).max(1)
-
-                        logits_open = nn.functional.softmax(logits_open_ulb_0.view(logits_open_ulb_0.size(0), 2, -1), 1)
-                        tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
-                        unk_score = logits_open[tmp_range, :, unlabel_pseudo_y]
-                        s_us_confidence, s_us_result = unk_score.max(1)
-                        used_unlabeled_index = (unlabel_confidence>p_cutoff) & (s_us_confidence>=pi) & (s_us_result==1)
-
+                        logits_x_ulb_s = self.predict(x_ulb_s)
+                        with torch.no_grad():
+                            logits_x_ulb_w, _ = outputs['logits'][num_lb:].chunk(2)
+                            unlabel_confidence, unlabel_pseudo_y = logits_x_ulb_w.softmax(1).max(1)
+                            logits_open = nn.functional.softmax(logits_open_ulb_0.view(logits_open_ulb_0.size(0), 2, -1), 1)
+                            tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
+                            unk_score = logits_open[tmp_range, :, unlabel_pseudo_y]
+                            s_us_confidence, s_us_result = unk_score.max(1)
+                            used_unlabeled_index = (unlabel_confidence>p_cutoff) & (s_us_confidence>=pi) & (s_us_result==1)
                         fix_loss = self.loss_function(logits_x_ulb_s[used_unlabeled_index], unlabel_pseudo_y[used_unlabeled_index].long().detach())
 
                     loss = sup_loss + ova_loss + lambda_em * em_loss + lambda_socr * socr_loss + fix_loss
@@ -666,14 +662,14 @@ class ImageNetClassification(Classification):
                     self.optimizer.step()
                 self.optimizer.zero_grad()
 
-                result['loss'][i] = loss.detach()
-                result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb.chunk(2)[0], y_lb).detach()
-                result['top@5'][i] = TopKAccuracy(k=5)(logits_x_lb.chunk(2)[0], y_lb).detach()
-                result['ece'][i] = self.get_ece(preds=logits_x_lb.chunk(2)[0].softmax(dim=1).detach().cpu().numpy(), targets=y_lb.cpu().numpy(), n_bins=n_bins, plot=False)[0]
+                result['loss'][i] = loss.item()
+                result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb, y_lb).item()
+                result['top@5'][i] = TopKAccuracy(k=5)(logits_x_lb, y_lb).item()
+                result['ece'][i] = self.get_ece(preds=logits_x_lb.softmax(dim=1).detach().cpu().numpy(), targets=y_lb.cpu().numpy(), n_bins=n_bins, plot=False)[0]
                 if current_epoch >= start_fix:
                     if used_unlabeled_index.sum().item() != 0:
-                        result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(logits_x_ulb_w[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
-                        result['unlabeled_top@5'][i] = TopKAccuracy(k=5)(logits_x_ulb_w[used_unlabeled_index], unlabel_y[used_unlabeled_index]).detach()
+                        result['unlabeled_top@1'][i] = TopKAccuracy(k=1)(logits_x_ulb_w[used_unlabeled_index], unlabel_y[used_unlabeled_index]).item()
+                        result['unlabeled_top@5'][i] = TopKAccuracy(k=5)(logits_x_ulb_w[used_unlabeled_index], unlabel_y[used_unlabeled_index]).item()
                         result['unlabeled_ece'][i] = self.get_ece(preds=logits_x_ulb_w[used_unlabeled_index].softmax(dim=1).detach().cpu().numpy(),
                                                                 targets=unlabel_y[used_unlabeled_index].cpu().numpy(),n_bins=n_bins, plot=False)[0]
                     result["N_used_unlabeled"][i] = used_unlabeled_index.sum().item()
