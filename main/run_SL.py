@@ -223,16 +223,6 @@ def main_worker(local_rank: int, config: object):
         logger.info(f'Total training time: {elapsed_mins:,.2f} minutes.')
         logger.handlers.clear()
 
-    if config.distributed:
-        if dist.is_initialized():
-            try:
-                dist.barrier()
-            except Exception as e:
-                print(f"[WARNING] dist.barrier() timed out: {e}")
-
-            if dist.is_initialized():
-                dist.destroy_process_group()
-
 if __name__ == '__main__':
 
     try:
