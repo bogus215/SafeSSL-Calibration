@@ -336,13 +336,13 @@ class Classification(Task):
     def openmatch_predict(self, x: torch.FloatTensor):
 
         logits, feat = self.get_feature(x)
-        logits_open = self.backbone.ova_classifiers(feat.squeeze())
+        logits_open = self.backbone.ova_classifiers(feat)
 
         return {'logits': logits, 'logits_open': logits_open}
 
     def get_feature(self, x: torch.FloatTensor):
         """Make a prediction provided a batch of samples."""
-        return self.backbone(x, True)
+        return self.backbone(x, return_feature=True)
     
     # Reference: https://github.com/VisionLearningGroup/OP_Match/blob/main/utils/misc.py
     @staticmethod
@@ -661,6 +661,7 @@ class ImageNetClassification(Classification):
                     loss.backward()
                     self.optimizer.step()
                 self.optimizer.zero_grad()
+                self.trained_iteration+=1
 
                 result['loss'][i] = loss.item()
                 result['top@1'][i] = TopKAccuracy(k=1)(logits_x_lb, y_lb).item()
