@@ -6,6 +6,8 @@ import numpy as np
 import rich
 import torch
 import torch.nn as nn
+import torch.multiprocessing as mp
+import torch.distributed as dist
 
 sys.path.append("./")
 from configs import TestingConfig
@@ -13,7 +15,8 @@ from datasets.cifar import CIFAR, load_CIFAR
 from datasets.transforms import SemiAugment, TestAugment
 from datasets.tiny import TinyImageNet ,load_tiny
 from datasets.svhn import SVHN, load_SVHN
-from models import WRN
+from datasets.imagenet import load_imagenet
+from models import WRN, densenet121, vgg16_bn, inceptionv4, ResNet50
 from tasks.testing import Testing
 from utils.gpu import set_gpu
 from utils.logging import get_rich_logger
@@ -23,6 +26,7 @@ NUM_CLASSES = {
     'cifar100': 50,
     'svhn': 6,
     'tiny': 100,
+    'imagenet': 500,
 }
 
 AUGMENTS = {
@@ -36,6 +40,12 @@ def main():
 
     config = TestingConfig.parse_arguments()
     set_gpu(config)
+    num_gpus_per_node = len(config.gpus)
+    world_size = config.num_nodes * num_gpus_per_node
+    distributed = world_size > 1
+    setattr(config, 'num_gpus_per_node', num_gpus_per_node)
+    setattr(config, 'world_size', world_size)
+    setattr(config, 'distributed', distributed)
 
     rich.print(config.__dict__)
     config.save(os.path.join(config.checkpoint_dir,"configs.json"))
@@ -45,18 +55,40 @@ def main():
     torch.backends.cudnn.deterministic = False
     torch.backends.cudnn.benchmark = True
 
-    rich.print("Single GPU training.")
-    main_worker(0, config=config)  # single machine, single gpu
+    if config.distributed:
+        rich.print(f"Distributed training on {world_size} GPUs.")
+        mp.spawn(
+            main_worker,
+            nprocs=config.num_gpus_per_node,
+            args=(config, )
+        )
+    else:
+        rich.print("Single GPU training.")
+        main_worker(0, config=config)  # single machine, single gpu
 
 def main_worker(local_rank: int, config: object):
     """Single process."""
 
     torch.cuda.set_device(local_rank)
+    if config.distributed:
+        dist_rank = config.node_rank * config.num_gpus_per_node + local_rank
+        dist.init_process_group(
+            backend=config.dist_backend,
+            init_method=config.dist_url,
+            world_size=config.world_size,
+            rank=dist_rank
+        )
+
+    config.batch_size = config.batch_size // config.world_size
+    config.num_workers = config.num_workers // config.num_gpus_per_node
+
     num_classes = NUM_CLASSES[config.data]
 
     # Networks
     if config.backbone_type in ['wide28_10',"wide28_2"]:
         model = WRN(width=int(config.backbone_type.split("_")[-1]), num_classes=num_classes, normalize=config.normalize)
+    elif config.backbone_type == 'resnet50':
+        model = ResNet50(num_classes=num_classes, normalize=config.normalize)
     else:
         raise NotImplementedError
 
@@ -107,11 +139,24 @@ def main_worker(local_rank: int, config: object):
         datasets, _ = load_SVHN(root=config.root, data_name=config.data, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
         open_test_set = SVHN(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
 
+    elif config.data == 'imagenet':
+        datasets, _, _, testset = load_imagenet(root=config.root, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio, random_state=config.seed, logger=logger)
+
+        from ffcv.writer import DatasetWriter
+        from ffcv.fields import IntField, RGBImageField
+        from torch.utils.data import Subset
+        
+        ffcv_file_path = os.path.join(config.root,'full-imagenet','val','test_total.ffcv')
+        if not os.path.exists(ffcv_file_path):
+            writer = DatasetWriter(ffcv_file_path,{'image': RGBImageField(write_mode="proportion",max_resolution=500,compress_probability=0.5,jpeg_quality=90),'label': IntField()}, num_workers=config.num_workers)
+            writer.from_indexed_dataset(Subset(testset, datasets['test_total']['images']), chunksize=100)
+        open_test_set = os.path.join(config.root,'full-imagenet','val','test_total.ffcv')
+        from tasks.testing import ImageNetTesting
     else:
         raise NotImplementedError
 
     # Model (Task)
-    model = Testing(backbone=model)
+    model = Testing(backbone=model) if config.data != 'imagenet' else ImageNetTesting(backbone=model)
     model.prepare(
         ckpt_dir=config.checkpoint_dir,
         model_ckpt_dir=config.checkpoint_dir.replace(f"{config.for_what}/","").replace("Testing",config.for_what),

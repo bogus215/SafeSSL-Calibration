@@ -995,7 +995,7 @@ class ImageNetClassification(Classification):
                     ckpt = os.path.join(self.ckpt_dir, "ckpt.best.pth.tar")
                     self.save_checkpoint(ckpt, epoch=epoch)
 
-                test_history = self.evaluate(test_loader,n_bins)
+                test_history = self.evaluate(test_loader, n_bins=n_bins, train_n_bins=train_n_bins)
                 for k, v1 in test_history[0].items():
                     epoch_history[k]['test'] = v1
 
@@ -1018,8 +1018,8 @@ class ImageNetClassification(Classification):
     def train(self, label_loader, unlabel_loader, current_epoch, start_fix, tau, pi, lambda_cali, lambda_ova_soft, lambda_ova_cali, lambda_ova, lambda_fix, smoothing_linear, smoothing_ova, n_bins):
         """Training defined for a single epoch."""
 
-        iteration = len(label_loader)
         self._set_learning_phase(train=True)
+        iteration = len(unlabel_loader)
         result = {
             'loss': torch.zeros(iteration),
             'label_sup': torch.zeros(iteration),

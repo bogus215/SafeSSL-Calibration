@@ -1050,3 +1050,301 @@ class Testing(Task):
         result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
         
         return {k: v.mean().item() for k, v in result.items()}
+    
+class ImageNetTesting(Testing):
+    def __init__(self, backbone: nn.Module):
+        super().__init__(backbone)
+        
+    def run(self,
+            for_what,
+            mismatch_ratio,
+            safe_student_T,
+            ova_pi,
+            open_test_set: torch.utils.data.Dataset = None,
+            **kwargs):  # pylint: disable=unused-argument
+
+        batch_size = self.batch_size
+        num_workers = self.num_workers
+
+        if not self.prepared:
+            raise RuntimeError("Training not prepared.")
+
+        distributed = kwargs.get('distributed')
+        
+        from ffcv.loader import Loader, OrderOption
+        from ffcv.transforms import ToTensor, ToDevice, ToTorchImage, NormalizeImage, Squeeze
+        from ffcv.fields.decoders import IntDecoder, CenterCropRGBImageDecoder
+        
+        label_pipeline = [IntDecoder(), ToTensor(), Squeeze(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True)]
+        img_pipeline_eval = [CenterCropRGBImageDecoder((224, 224),DEFAULT_CROP_RATIO), ToTensor(), ToDevice(torch.device(f"cuda:{self.local_rank}"),non_blocking=True), ToTorchImage(), NormalizeImage(IMAGENET_MEAN,IMAGENET_STD, np.float16)]
+
+        # DataLoader (Evaluation)
+        open_test_loader = Loader(open_test_set, batch_size=batch_size, order=OrderOption.SEQUENTIAL, num_workers=num_workers, drop_last=False,distributed=distributed,pipelines={'image':img_pipeline_eval,'label':label_pipeline})
+
+        # Logging
+        logger = kwargs.get('logger', None)
+
+        # Evaluate (Validation)
+        if for_what=="Proposed":
+            eval_history = self.proposed_evaluate(open_test_loader,ova_pi)
+        elif for_what=="SafeStudent":
+            eval_history = self.safestudent_evaluate(open_test_loader, mismatch_ratio=mismatch_ratio, safe_student_T=safe_student_T)
+        elif for_what=="Ablation1":
+            eval_history = self.ablation1_evaluate(open_test_loader)
+        elif for_what=="Ablation2":
+            eval_history = self.ablation2_evaluate(open_test_loader)
+        elif for_what=="Ablation3":
+            eval_history = self.ablation3_evaluate(open_test_loader)
+        elif for_what=="Ablation4":
+            eval_history = self.ablation4_evaluate(open_test_loader)
+        elif for_what=="Ablation5":
+            eval_history = self.ablation5_evaluate(open_test_loader)
+        elif for_what=="IOMATCH":
+            eval_history = self.iomatch_evaluate(open_test_loader)
+        elif "OPENMATCH" in for_what:
+            eval_history = self.openmatch_evaluate(open_test_loader,ova_pi)
+        elif for_what in ["FIXMATCH","SL"]:
+            eval_history = self.fixmatch_evaluate(open_test_loader)
+        elif for_what=="MTC":
+            eval_history = self.mtc_evaluate(open_test_loader)
+        else:
+            pass
+
+        log=""
+        for k, v in eval_history.items():
+            log += f" {k}: {v:.5f} |"
+
+        if logger is not None:
+            logger.info(log)
+
+    @torch.no_grad()
+    def openmatch_evaluate(self, data_loader, ova_pi, **kwargs):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+        result = {
+            'top@1': torch.zeros(1, device=self.local_rank),
+            'top@1-ova': torch.zeros(1, device=self.local_rank),
+            'ECE': np.zeros(1),
+            'ECE-ova': np.zeros(1),
+            "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
+            "Accuracy": np.zeros(1),
+            'In distribution over conf 0.95: ECE': np.zeros(1),
+            'In distribution under ood score 0.5: ECE': np.zeros(1),
+            "IN-SEEN-DETECTION-ECE": np.zeros(1),
+            "OOD-SEEN-DETECTION-ECE": np.zeros(1),
+            "ALL-SEEN-DETECTION-ECE": np.zeros(1),
+        }
+
+        labels, logits, out_scores, in_scores, ova_logits = [], [], [], [], []
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Data Testing...", total=steps)
+
+            for i, batch in enumerate(data_loader):
+
+                x, y = batch[0], batch[1]
+
+                with torch.autocast('cuda', enabled = True):
+                    logit, feat = self.backbone(x, return_feature=True)
+                    logits_open = self.backbone.ova_classifiers(feat)
+
+                    logits_open = nn.functional.softmax(logits_open.view(logits_open.size(0), 2, -1), 1)
+                    tmp_range = torch.arange(0, logits_open.size(0)).long().cuda(self.local_rank)
+
+                    pred_close = logit.data.max(1)[1]
+                    unk_score = logits_open[tmp_range, 0, pred_close]
+                    sen_score = logits_open[tmp_range, 1, pred_close]
+
+                labels.append(y.cpu())
+                logits.append(logit.cpu())
+                out_scores.append(unk_score.cpu())
+                in_scores.append(sen_score.cpu())
+                ova_logits.append(logits_open.view(logits_open.size(0), 2, -1).cpu())
+                
+                if self.local_rank == 0:
+                    desc = f"[bold pink] [{i+1}/{steps}] |"
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        labels, logits, out_scores, in_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(out_scores,axis=0), torch.cat(in_scores,axis=0), torch.cat(ova_logits,axis=0)
+        
+        in_pred = (out_scores < 0.5).cpu()
+        ood_pred = (in_scores < 0.5).cpu()
+        in_label = torch.where(labels<logits.size(1),1,0)
+        ood_label = torch.where(labels>=logits.size(1),1,0)
+
+        result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
+        result['top@1-ova'][0] = TopKAccuracy(k=1)(ova_logits.softmax(dim=1)[labels<logits.size(1),1,:], labels[labels<logits.size(1)])
+        result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
+        result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
+        
+        ovr_confidence, ovr_results = torch.cat([out_scores.unsqueeze(1),in_scores.unsqueeze(1)],axis=1).max(1)
+
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu()[ovr_confidence>=ova_pi], y_score=out_scores.cpu()[ovr_confidence>=ova_pi])
+        result['F1-IN'][0] = f1_score(y_true=in_label[ovr_confidence>=ova_pi],y_pred=in_pred[ovr_confidence>=ova_pi])
+        result['F1-OOD'][0] = f1_score(y_true=ood_label[ovr_confidence>=ova_pi],y_pred=ood_pred[ovr_confidence>=ova_pi])
+        result['Accuracy'][0] = accuracy_score(y_true=in_label[ovr_confidence>=ova_pi],y_pred=in_pred[ovr_confidence>=ova_pi])
+
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ovr_confidence[labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ovr_confidence[labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
+        result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ovr_confidence.numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
+        result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
+        result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
+
+        import pickle
+        with open(os.path.join(self.ckpt_dir,'results.pickle'),'wb') as f:
+            pickle.dump({"predicted_label":in_pred.numpy(),"confidences":ovr_confidence.numpy(),"targets":in_label.numpy(),"selected":((ovr_confidence>=ova_pi) & (labels<logits.size(1))).sum().item()},f,protocol=pickle.HIGHEST_PROTOCOL)
+        
+        return {k: v.mean().item() for k, v in result.items()}
+
+    @torch.no_grad()
+    def proposed_evaluate(self, data_loader,ova_pi, **kwargs):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+        result = {
+            'top@1': torch.zeros(1, device=self.local_rank),
+            'top@5': torch.zeros(1, device=self.local_rank),
+            'top@1-ova': torch.zeros(1, device=self.local_rank),
+            'ECE': np.zeros(1),
+            'ECE-ova': np.zeros(1),
+            "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
+            "Accuracy": np.zeros(1),
+            'In distribution over conf 0.95: ECE': np.zeros(1),
+            'In distribution under ood score 0.5: ECE': np.zeros(1),
+            "IN-SEEN-DETECTION-ECE": np.zeros(1),
+            "OOD-SEEN-DETECTION-ECE": np.zeros(1),
+            "ALL-SEEN-DETECTION-ECE": np.zeros(1),
+        }
+
+        labels, logits, ova_scores, ova_logits = [], [], [], []
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Data Testing...", total=steps)
+
+            for i, batch in enumerate(data_loader):
+
+                x, y = batch[0], batch[1]
+
+                with torch.autocast('cuda', enabled = True):
+                    logit, features = self.backbone(x, return_feature=True)
+                    logit = self.backbone.scaling_logits(logit)
+                    probs = nn.functional.softmax(logit, 1)
+
+                    ova_logit = self.backbone.scaling_logits(self.backbone.ova_classifiers(features),name='ova_cali_scaler').view(features.size(0),2,-1)
+                    ova_score = (ova_logit.softmax(1)*probs.unsqueeze(1)).sum(-1)
+                
+                labels.append(y.cpu())
+                logits.append(logit.cpu())
+                ova_scores.append(ova_score.cpu())
+                ova_logits.append(ova_logit.cpu())
+                
+                if self.local_rank == 0:
+                    desc = f"[bold pink] [{i+1}/{steps}] |"
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        labels, logits, ova_scores, ova_logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0), torch.cat(ova_scores,axis=0), torch.cat(ova_logits,axis=0)
+        
+        in_pred = (ova_scores[:,0] < 0.5).cpu()
+        ood_pred = (ova_scores[:,1] < 0.5).cpu()
+        in_label = torch.where(labels<logits.size(1),1,0)
+        ood_label = torch.where(labels>=logits.size(1),1,0)
+
+        result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
+        result['top@5'][0] = TopKAccuracy(k=5)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
+        result['top@1-ova'][0] = TopKAccuracy(k=1)(ova_logits.softmax(dim=1)[labels<logits.size(1),1,:], labels[labels<logits.size(1)])
+        result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
+        result['ECE-ova'][0] = self.get_ece(preds=ova_logits.softmax(dim=1)[labels<logits.size(1),1,:].numpy(), targets = labels[labels<logits.size(1)].numpy(), plot_title="_all_ova")
+        
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label[ova_scores.max(1)[0]>=ova_pi].cpu(), y_score=ova_scores[ova_scores.max(1)[0]>=ova_pi,0])
+
+        result['F1-IN'][0] = f1_score(y_true=in_label[ova_scores.max(1)[0]>=ova_pi],y_pred=in_pred[ova_scores.max(1)[0]>=ova_pi])
+        result['F1-OOD'][0] = f1_score(y_true=ood_label[ova_scores.max(1)[0]>=ova_pi],y_pred=ood_pred[ova_scores.max(1)[0]>=ova_pi])
+
+        result['Accuracy'][0] = accuracy_score(y_true=in_label[ova_scores.max(1)[0]>=ova_pi],y_pred=in_pred[ova_scores.max(1)[0]>=ova_pi])
+
+        result['IN-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels<logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels<logits.size(1)].numpy(),targets=in_label[labels<logits.size(1)].numpy(),title='IN',n_bins=15)
+        result['OOD-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred[labels>=logits.size(1)].numpy(),confidences=ova_scores.max(1)[0][labels>=logits.size(1)].numpy(),targets=in_label[labels>=logits.size(1)].numpy(),title='OOD',n_bins=15)
+        result['ALL-SEEN-DETECTION-ECE'][0] = self.seen_unseen_detection_get_ece(predicted_label=in_pred.numpy(),confidences=ova_scores.max(1)[0].numpy(),targets=in_label.numpy(),title='ALL',n_bins=15)
+        result['In distribution over conf 0.95: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
+        result['In distribution under ood score 0.5: ECE'][0] = self.get_ece(preds=logits[(labels<logits.size(1)) & (in_pred)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (in_pred)].numpy(), plot_title="_ood_score_under_05")
+        
+        import pickle
+        with open(os.path.join(self.ckpt_dir,'results.pickle'),'wb') as f:
+            pickle.dump({"predicted_label":in_pred.numpy(),
+                         "confidences":ova_scores.max(1)[0].numpy(),
+                         "targets":in_label.numpy(),
+                         "selected":((ova_scores.max(1)[0]>=ova_pi) & (labels<logits.size(1))).sum().item(),
+                         },f,protocol=pickle.HIGHEST_PROTOCOL)
+        
+        return {k: v.mean().item() for k, v in result.items()}
+
+    @torch.no_grad()
+    def fixmatch_evaluate(self, data_loader, **kwargs):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+        result = {
+            'top@1': torch.zeros(1, device=self.local_rank),
+            'ECE': np.zeros(1),
+            "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
+            'In distribution over conf 0.95: ECE': np.zeros(1),
+        }
+
+        labels, logits  = [], []
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Data Testing...", total=steps)
+
+            for i, batch in enumerate(data_loader):
+
+                with torch.autocast('cuda', enabled = True):
+
+                    x,y = batch[0], batch[1]
+                    logit = self.predict(x)
+                
+                labels.append(y.cpu())
+                logits.append(logit.cpu())
+                
+                if self.local_rank == 0:
+                    desc = f"[bold pink] [{i+1}/{steps}] |"
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        labels, logits = torch.cat(labels,axis=0), torch.cat(logits,axis=0)
+        
+        in_label = torch.where(labels<logits.size(1),1,0)
+        ood_label = torch.where(labels>=logits.size(1),1,0)
+        in_pred = (logits.softmax(1).max(1)[0] > 0.95).cpu()
+        ood_pred = (logits.softmax(1).max(1)[0] <= 0.95).cpu()
+
+        result['top@1'][0] = TopKAccuracy(k=1)(logits[labels<logits.size(1)], labels[labels<logits.size(1)])
+        result['ECE'][0] = self.get_ece(preds=logits[labels<logits.size(1)].softmax(dim=1).numpy(), targets = labels[labels<logits.size(1)].numpy())
+        result['AUROC'][0] = roc_auc_score(y_true=ood_label.cpu(), y_score=(1-logits.softmax(1).max(1)[0]).cpu())
+        result['F1-IN'][0] = f1_score(y_true=in_label,y_pred=in_pred)
+        result['F1-OOD'][0] = f1_score(y_true=ood_label,y_pred=ood_pred)
+        result['In distribution over conf 0.95: ECE'] = self.get_ece(preds=logits[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].softmax(dim=1).numpy(), targets = labels[(labels<logits.size(1)) & (logits.softmax(1).max(1)[0]>=0.95)].numpy(), plot_title="_conf_over_95")
+    
+        return {k: v.mean().item() for k, v in result.items()}
+
+    
+IMAGENET_MEAN = np.array([0.485, 0.456, 0.406]) * 255
+IMAGENET_STD = np.array([0.229, 0.224, 0.225]) * 255
+DEFAULT_CROP_RATIO = 224/256
