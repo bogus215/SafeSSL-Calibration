@@ -472,6 +472,53 @@ class OPENMATCHMMCEConfig(ConfigBase):
     @property
     def task(self) -> str:
         return "OPENMATCH+MMCE"
+
+class OPENMATCHRankMixupConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(OPENMATCHRankMixupConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--p-cutoff', type=float, default=0.95)
+        parser.add_argument('--pi', type=float, default=0.5)
+        parser.add_argument('--lambda-em', type=float, default=0.1)
+        parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
+        parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--alpha', type=float, default=0.2, help = "For mixup, we fix α = 1, which results in interpolations λ uniformly distributed between zero and one.")
+        parser.add_argument('--num-mixup', type=int, default=1, help = "")
+        parser.add_argument('--loss-coef', type=float, default=0.5, help = "")
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "OPENMATCH+RankMixup"
+
+class OPENMATCHMbLSConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(OPENMATCHMbLSConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--p-cutoff', type=float, default=0.95)
+        parser.add_argument('--pi', type=float, default=0.5)
+        parser.add_argument('--lambda-em', type=float, default=0.1)
+        parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
+        parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--margin', type=float, default=10, help = "")
+        parser.add_argument('--loss-coef', type=float, default=0.1, help = "")
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "OPENMATCH+MbLS"
     
 class PseudoLabelConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
