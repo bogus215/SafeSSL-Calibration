@@ -188,7 +188,7 @@ class FIXMATCHConfig(ConfigBase):
         parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--tau', type=float, default=0.95)
         parser.add_argument('--consis-coef', type=float, default=1)
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
 
         return parser
 
@@ -232,7 +232,7 @@ class ProposedConfig(ConfigBase):
 
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
 
         parser.add_argument('--lambda-cali', type=float, default=1)
         parser.add_argument('--lambda-ova-soft', type=float, default=5e-1)
@@ -260,7 +260,7 @@ class ProposedPlusConfig(ConfigBase):
 
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
 
         parser.add_argument('--lambda-cali', type=float, default=1)
         parser.add_argument('--lambda-ova-soft', type=float, default=5e-1)
@@ -286,7 +286,7 @@ class Ablation1Config(ConfigBase):
 
         parser.add_argument('--tau', type=float, default=0.95)
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
 
         parser.add_argument('--lambda-ova-soft', type=float, default=5e-1)
@@ -313,7 +313,7 @@ class Ablation2Config(ConfigBase):
         parser.add_argument('--tau', type=float, default=0.95)
         parser.add_argument('--train-n-bins', type=int, default=30, help = "Expected calibration error, n-bins in AcatS.")
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
 
         parser.add_argument('--lambda-cali', type=float, default=1)
         parser.add_argument('--lambda-ova-soft', type=float, default=5e-1)
@@ -338,7 +338,7 @@ class Ablation3Config(ConfigBase):
 
         parser.add_argument('--tau', type=float, default=0.95)
         parser.add_argument('--normalize', action='store_true', help = "L2 Normalize.")
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
 
         parser.add_argument('--lambda-ova-soft', type=float, default=5e-1)
         parser.add_argument('--lambda-ova', type=float, default=5e-1)
@@ -399,13 +399,34 @@ class OPENMATCHConfig(ConfigBase):
         parser.add_argument('--pi', type=float, default=0.5)
         parser.add_argument('--lambda-em', type=float, default=0.1)
         parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
 
         return parser
 
     @property
     def task(self) -> str:
         return "OPENMATCH"
+
+class SCOMATCHConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(SCOMATCHConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--threshold', type=float, default=0.95)
+        parser.add_argument('--ood-threshold', type=float, default=0.95)
+        parser.add_argument('--Km', type=int, default=1)
+        parser.add_argument('--T', type=float, default=1)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "SCOMATCH"
 
 class OPENMATCHMixupConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
@@ -420,7 +441,7 @@ class OPENMATCHMixupConfig(ConfigBase):
         parser.add_argument('--pi', type=float, default=0.5)
         parser.add_argument('--lambda-em', type=float, default=0.1)
         parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--alpha', type=float, default=0.2)
 
         return parser
@@ -442,7 +463,7 @@ class OPENMATCHSmoothingConfig(ConfigBase):
         parser.add_argument('--pi', type=float, default=0.5)
         parser.add_argument('--lambda-em', type=float, default=0.1)
         parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--alpha', type=float, default=0.01, choices=(0.01, 0.05, 0.005))
 
         return parser
@@ -464,7 +485,7 @@ class OPENMATCHMMCEConfig(ConfigBase):
         parser.add_argument('--pi', type=float, default=0.5)
         parser.add_argument('--lambda-em', type=float, default=0.1)
         parser.add_argument('--lambda-socr', type=float, default=0.5, help='SOCR enhances the smoothness of the outlier detector over data augmentation')
-        parser.add_argument('--start-fix', type=int, default=50)
+        parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--lambda-mmce', type=float, default=9)
 
         return parser

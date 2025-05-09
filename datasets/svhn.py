@@ -223,6 +223,13 @@ class Selcted_DATA(Dataset):
             return {'idx_ulb': data_idx, 'x_ulb_w_0': weak_img, 'x_ulb_w_1': self.transform(img), 'y_ulb': target}
         elif self.name == 'train_ulb_selected':
             return {'x_ulb_w': weak_img, 'x_ulb_w_1': self.transform(img), 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
+        elif self.name == 'sco_lb':
+            return {'inputs_x': weak_img, 'targets_x': target}
+        elif self.name == 'sco_ulb':
+            return {'inputs_u_w': weak_img, 'inputs_u_s': self.transform.strong_transform(img),
+                    'inputs_all_w':self.transform(img),
+                    'inputs_all_s':self.transform.strong_transform(img),
+                    'targets_u_eval': target}
         else:
             raise ValueError
         
