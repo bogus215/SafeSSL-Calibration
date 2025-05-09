@@ -230,6 +230,16 @@ class Selcted_DATA(Dataset):
                     'inputs_all_w':self.transform(img),
                     'inputs_all_s':self.transform.strong_transform(img),
                     'targets_u_eval': target}
+        elif self.name == 'ssb_lb':
+            return {"inputs_x_w":weak_img,"inputs_x_s":self.transform.strong_transform(img),
+                    "inputs_x_s2":self.transform.strong_transform(img),"inputs_x":self.transform(img),"targets_x":target}
+        elif self.name == 'ssb_ulb':
+            return {'inputs_u_w': weak_img, 'inputs_u_s': self.transform.strong_transform(img),
+                    'inputs_all_w':self.transform(img),'inputs_all':self.transform(img),
+                    'inputs_all_s':self.transform.strong_transform(img),
+                    'inputs_all_s2':self.transform.strong_transform(img),
+                    'targets_u_gt': target,
+                    'targets_all_u': target}
         else:
             raise ValueError
         

@@ -428,6 +428,32 @@ class SCOMATCHConfig(ConfigBase):
     def task(self) -> str:
         return "SCOMATCH"
 
+class SSBConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(SSBConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--lambda-ova-u', type=float, default=1)
+        parser.add_argument('--ova-unlabeled-threshold', type=float)
+        parser.add_argument('--lambda-x', type=float, default=1)
+        parser.add_argument('--lambda-ova', type=float, default=1)
+        parser.add_argument('--lambda-oem', type=float, default=0.1)
+        parser.add_argument('--lambda-socr', type=float, default=0.5)
+        parser.add_argument('--lambda-u', type=float, default=1)
+        parser.add_argument('--T', type=float, default=1)
+        parser.add_argument('--threshold', type=float, default=0.95)
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "SSB"
+
 class OPENMATCHMixupConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
         super(OPENMATCHMixupConfig, self).__init__(args, **kwargs)
