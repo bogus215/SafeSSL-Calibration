@@ -439,7 +439,7 @@ class SSBConfig(ConfigBase):
         parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
         parser.add_argument('--start-fix', type=int, default=5)
         parser.add_argument('--lambda-ova-u', type=float, default=1)
-        parser.add_argument('--ova-unlabeled-threshold', type=float)
+        parser.add_argument('--ova-unlabeled-threshold', type=float, default=0.01)
         parser.add_argument('--lambda-x', type=float, default=1)
         parser.add_argument('--lambda-ova', type=float, default=1)
         parser.add_argument('--lambda-oem', type=float, default=0.1)

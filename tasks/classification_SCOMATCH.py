@@ -137,6 +137,52 @@ class Classification(Task):
             if logger is not None:
                 logger.info(log)
 
+    @torch.no_grad()
+    def evaluate(self, data_loader, n_bins):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+        result = {
+            'loss': torch.zeros(steps, device=self.local_rank),
+            'top@1': torch.zeros(1, device=self.local_rank),
+            'ece': torch.zeros(1, device=self.local_rank)
+        }
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Evaluating...", total=steps)
+
+            pred,true,IDX=[],[],[]
+            for i, batch in enumerate(data_loader):
+
+                x = batch['x'].to(self.local_rank)
+                y = batch['y'].to(self.local_rank)
+                idx = batch['idx'].to(self.local_rank)
+
+                logits = self.scomatch_predict(x)[1][:,:self.backbone.class_num]
+                loss = self.loss_function(logits, y.long())
+
+                result['loss'][i] = loss
+                true.append(y.cpu())
+                pred.append(logits.cpu())
+                IDX += [idx]
+                
+                if self.local_rank == 0:
+                    desc = f"[bold green] [{i+1}/{steps}]: " + f" loss : {result['loss'][:i+1].mean():.4f} |" + f" top@1 : {TopKAccuracy(k=1)(logits, y).detach():.4f} |"
+                    pg.update(task, advance=1., description=desc)
+                    pg.refresh()
+
+        # preds, pred are logit vectors
+        preds, trues = torch.cat(pred,axis=0), torch.cat(true,axis=0)
+        result['top@1'][0] = TopKAccuracy(k=1)(preds, trues)
+
+        ece_results = self.get_ece(preds=preds.softmax(dim=1).numpy(), targets=trues.numpy(), n_bins=n_bins, plot=False)
+        result['ece'][0] = ece_results[0]
+
+        return {k: v.mean().item() for k, v in result.items()}
+
     def train(self, label_loader, unlabel_loader, current_epoch, start_fix, n_bins, ood_threshold):
         """Training defined for a single epoch."""
 

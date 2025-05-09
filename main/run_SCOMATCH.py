@@ -135,7 +135,6 @@ def main_worker(local_rank: int, config: object):
 
         eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
-        open_test_set = CIFAR(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
     
     elif config.data == 'tiny':
         
@@ -146,7 +145,6 @@ def main_worker(local_rank: int, config: object):
         
         eval_set = TinyImageNet(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = TinyImageNet(data_name=config.data, dataset=datasets['test'], transform=test_trans)
-        open_test_set = TinyImageNet(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
     
     elif config.data == 'svhn':
         
@@ -157,7 +155,6 @@ def main_worker(local_rank: int, config: object):
 
         eval_set = SVHN(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
         test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
-        open_test_set = SVHN(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
     
     elif config.data == 'imagenet':
         
@@ -183,8 +180,6 @@ def main_worker(local_rank: int, config: object):
         unlabeled_set = os.path.join(config.root,'full-imagenet','train','u_train.ffcv')
         eval_set = os.path.join(config.root,'full-imagenet','train','validation.ffcv')
         test_set = os.path.join(config.root,'full-imagenet','val','test.ffcv')
-        open_test_set = os.path.join(config.root,'full-imagenet','val','test_total.ffcv')
-        selcted_unlabeled_set = None
         
         from tasks.classification_OPENMATCH import ImageNetClassification
 
