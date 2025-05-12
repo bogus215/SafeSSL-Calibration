@@ -240,7 +240,7 @@ class Classification(Task):
 
                         total_acc = targets_u.cpu().eq(targets_u_gt).float().view(-1)
                         if mask.sum() != 0:
-                            tmp = (targets_u_gt[mask != 0] == self.backbone.class_num).float()
+                            tmp = (targets_u_gt[mask.cpu() != 0] == self.backbone.class_num).float()
 
                         pred_id = mask.cpu().numpy()  # 1 for ID data
                         targets_id = (targets_u_gt < self.backbone.class_num).float().cpu().numpy()  # ID index
@@ -685,7 +685,7 @@ def ova_loss(logits_open_w, logits_open_s, label, label_s):
 
     return open_loss_pos + open_loss_neg
 
-def unlabeled_ova_neg_loss(args, logits_w1, logits_w2, logits_s1, logits_s2, mask):
+def unlabeled_ova_neg_loss(logits_w1, logits_w2, logits_s1, logits_s2, mask):
     logits_w2 = logits_w2.view(logits_w2.size(0), 2, -1)  # [bs, 2, num_class]
     logits_s1 = logits_s1.view(logits_s1.size(0), 2, -1)  # [bs, 2, num_class]
     open_loss_neg = torch.mean((-F.log_softmax(logits_s1, dim=1)[:, 0, :] * mask).sum(dim=1))
