@@ -454,6 +454,30 @@ class SSBConfig(ConfigBase):
     def task(self) -> str:
         return "SSB"
 
+class ACRConfig(ConfigBase):
+    def __init__(self, args=None, **kwargs):
+        super(ACRConfig, self).__init__(args, **kwargs)
+
+    @staticmethod
+    def task_specific_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser('Linear evaluation of pre-trained model.', add_help=False)
+        parser.add_argument('--train-augment', type=str, default='semi', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--test-augment', type=str, default='test', choices=('finetune', 'test', 'semi'))
+        parser.add_argument('--start-fix', type=int, default=5)
+        parser.add_argument('--threshold', type=float, default=0.95)
+        parser.add_argument('--T', type=float, default=1)
+        parser.add_argument('--tau1', default=2, type=float, help='tau for head1 consistency')
+        parser.add_argument('--tau12', default=2, type=float, help='tau for head2 consistency')
+        parser.add_argument('--tau2', default=2, type=float, help='tau for head2 balanced CE loss')
+        parser.add_argument('--ema-u', default=0.9, type=float, help='ema ratio for estimating distribution of the unlabeled data')
+        parser.add_argument('--est-epoch', default=5, type=int, help='the start step to estimate the distribution')
+
+        return parser
+
+    @property
+    def task(self) -> str:
+        return "ACR"
+
 class OPENMATCHMixupConfig(ConfigBase):
     def __init__(self, args=None, **kwargs):
         super(OPENMATCHMixupConfig, self).__init__(args, **kwargs)
