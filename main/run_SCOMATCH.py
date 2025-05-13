@@ -18,7 +18,7 @@ from datasets.imagenet import load_imagenet
 from datasets.transforms import SemiAugment, TestAugment
 
 from models import WRN, densenet121, inceptionv4, vgg16_bn, ResNet50
-from tasks.classification_SCOMATCH import Classification
+from tasks.classification_SCOMATCH import Classification, TinyClassification
 from utils.gpu import set_gpu
 from utils.initialization import initialize_weights
 from utils.logging import get_rich_logger
@@ -194,7 +194,13 @@ def main_worker(local_rank: int, config: object):
         logger.info(f'Checkpoint directory: {config.checkpoint_dir}')
 
     # Model (Task)
-    model = Classification(backbone=model) if config.data != 'imagenet' else ImageNetClassification(backbone=model)
+    if config.data in ['cifar10','cifar100','svhn']:
+        model = Classification(backbone=model)
+    elif config.data in ['imagenet']:
+        model = ImageNetClassification(backbone=model)
+    elif config.data in ['tiny']:
+        model = TinyClassification(backbone=model)
+
     model.prepare(
         ckpt_dir=config.checkpoint_dir,
         optimizer=config.optimizer,
