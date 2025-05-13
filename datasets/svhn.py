@@ -242,7 +242,68 @@ class Selcted_DATA(Dataset):
                     'targets_all_u': target}
         else:
             raise ValueError
+
+class ACR(Dataset):
+    def __init__(self,
+                 labelset: dict,
+                 unlabelset: dict,
+                 name: str,
+                 transform: object = None,
+                 **kwargs):
+
+        if name == 'lb':
+            self.data = deepcopy(labelset['images'])
+            self.targets = deepcopy(labelset['labels'])
+        elif name =='ulb':
+            tot_images = np.concatenate([deepcopy(labelset['images']), deepcopy(unlabelset['images'])],axis=0)
+            tot_labels = [-2 for _ in range(labelset['labels'].__len__())] + deepcopy(unlabelset['labels'])
+            self.data, _, self.targets, _ = train_test_split(tot_images, tot_labels, train_size=unlabelset['images'].shape[0], stratify=tot_labels)
+        else:
+            pass
+            
+        self.transform = transform
+        self.name = name
         
+        self.idx_data = np.arange(len(self.data))
+        
+        self.data_index = None
+        self.targets_index = None
+        self.set_index()
+
+    def set_index(self, indices=None):
+        if indices is not None:
+            self.data_index = self.data[indices.cpu()]
+            self.targets_index = np.array(self.targets)[indices.cpu()].tolist()
+        else:
+            self.data_index = self.data
+            self.targets_index = self.targets
+            
+    def __len__(self):
+        return len(self.data_index)
+
+    def __sample__(self, idx):
+        if self.targets is None:
+            target = None
+        else:
+            target = self.targets_index[idx]
+        img = self.data_index[idx]
+        data_idx = self.idx_data[idx]
+
+        return img, target, data_idx
+
+    def __getitem__(self, idx):
+        
+        img, target, data_idx = self.__sample__(idx)
+        if self.transform is not None:
+            weak_img = self.transform(img)
+
+        if self.name == 'lb':
+            return {'idx_lb': data_idx, 'inputs_x': weak_img, 'targets_x': target}
+        elif self.name == 'ulb':
+            return {'idx_ulb': data_idx, 'inputs_u_w': weak_img, 'inputs_u_s': self.transform.strong_transform(img), 'inputs_u_s1': self.transform.strong_transform(img), 'u_real': target}
+        else:
+            raise ValueError
+
 class Selcted_DATA_Proposed(Dataset):
     def __init__(self,
                  dataset: dict,

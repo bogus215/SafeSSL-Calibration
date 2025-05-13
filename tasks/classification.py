@@ -60,7 +60,7 @@ class Classification(Task):
         self.backbone.to(local_rank)
 
         # Mixed precision training (optional)
-        self.scaler = torch.GradScaler("cuda") if mixed_precision else None
+        self.scaler = torch.cuda.amp.GradScaler() if mixed_precision else None
 
         # Optimization (TODO: freeze)
         self.optimizer = get_optimizer(
