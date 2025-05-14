@@ -790,10 +790,10 @@ class TinyClassification(Task):
         per_epoch_steps = self.iterations // epochs
 
         l_sampler = DistributedSampler(dataset=train_set[0], num_replicas=1, rank=self.local_rank, num_samples=per_epoch_steps * 64)
-        l_loader = DataLoader(train_set[0],batch_size=self.batch_size//2, sampler=l_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
+        l_loader = DataLoader(train_set[0],batch_size=64, sampler=l_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         u_sampler = DistributedSampler(dataset=train_set[1], num_replicas=1, rank=self.local_rank, num_samples=per_epoch_steps * 64 * 3)
-        unlabel_loader = DataLoader(train_set[1],batch_size=self.batch_size//2, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
+        unlabel_loader = DataLoader(train_set[1],batch_size=64*3, sampler=u_sampler,num_workers=num_workers,drop_last=False,pin_memory=False)
 
         eval_loader = DataLoader(eval_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
         test_loader = DataLoader(test_set,batch_size=128,shuffle=False,num_workers=num_workers,drop_last=False,pin_memory=False)
