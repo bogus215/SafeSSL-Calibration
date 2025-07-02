@@ -1,0 +1,16 @@
+--gpus=0
+--seed=1
+--data=tiny
+--server=main
+--normalize
+--n-label-per-class=100
+--n-valid-per-class=50
+--mismatch-ratio=0.60
+--tau=0.95
+--save-every=5000
+--n-bins=15
+--weight-decay=0
+--lambda-ova-cali=0.001
+--lambda-ova=1
+--wandb-proj-v=-final
+--batch-size=256

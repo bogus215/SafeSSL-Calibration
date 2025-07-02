@@ -7,9 +7,9 @@
 --n-valid-per-class=500
 --mismatch-ratio=0.60
 --tau=0.95
---save-every=5000
+--save-every=500
 --n-bins=15
 --weight-decay=0
 --lambda-ova-cali=0.1
 --lambda-ova=0.1
---wandb-proj-v=-v20
+--start-fix=0

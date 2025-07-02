@@ -5,3 +5,5 @@ checkpoints
 datasets/cifar-10*
 datasets/tiny-*
 **/*mat
+**/**.pdf
+**/**.png

@@ -1,13 +1,14 @@
 --gpus=0
 --seed=1
---data=svhn
+--data=tiny
 --server=main
---n-label-per-class=50
 --mismatch-ratio=0.60
 --mixed-precision
---save-every=500
+--save-every=5000
 --learning-rate=3e-3
 --backbone-type=wide28_2
 --optimizer=adam
 --weight-decay=0
 --warm-up=1
+--n-label-per-class=100
+--n-valid-per-class=50
