@@ -134,3 +134,58 @@ done
 #                                 --checkpoint-hash ${HASH[$seed]} \
 #                                 --for-what Proposed --normalize
 # done
+
+
+CIFAR10_SEEDS=(2 6 7 8 9)
+PI_1=(2024-04-13_13-53-56 2024-04-20_16-38-39 2024-04-20_19-15-18 2024-04-20_21-51-57 2024-04-21_00-28-36)
+PI_2=(2024-04-17_10-25-16 2024-04-18_02-04-11 2024-04-18_17-43-29 2024-04-19_09-23-26 2024-04-20_01-01-03)
+PI_3=(2024-04-17_15-38-37 2024-04-18_07-18-26 2024-04-18_22-58-02 2024-04-19_14-37-06 2024-04-20_06-14-41)
+PI_4=(2024-04-17_20-51-37 2024-04-18_12-32-13 2024-04-19_04-12-29 2024-04-19_19-50-26 2024-04-20_11-28-05)
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${PI_1[$seed]} \
+                                --for-what Proposed --normalize --ova-pi 0.5
+done
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${PI_2[$seed]} \
+                                --for-what Proposed --normalize --ova-pi 0.6
+done
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${PI_3[$seed]} \
+                                --for-what Proposed --normalize --ova-pi 0.7
+done
+
+for seed in 0 1 2 3 4
+do
+    python ./main/run_testing.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                --data cifar10 --server main \
+                                --n-label-per-class 400 \
+                                --n-valid-per-class 500 \
+                                --mismatch-ratio 0.6 \
+                                --backbone-type wide28_2 \
+                                --checkpoint-hash ${PI_4[$seed]} \
+                                --for-what Proposed --normalize --ova-pi 0.8
+done
