@@ -1,9 +1,0 @@
---gpus=0
---data=cifar10
---server=main
---n-label-per-class=400
---n-valid-per-class=500
---mismatch-ratio=0.6
---for-what=OPENMATCH+Smoothing
---checkpoint-hash=2024-07-31_04-35-13
---seed=2

@@ -1,9 +1,0 @@
---gpus=0
---data=cifar10
---server=workstation3
---n-label-per-class=400
---n-valid-per-class=500
---mismatch-ratio=0.60
---for-what=SafeStudent
---checkpoint-hash=2024-03-21_20-58-29
---seed=2

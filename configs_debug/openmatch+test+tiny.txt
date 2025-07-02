@@ -1,9 +1,0 @@
---gpus=0
---data=tiny
---server=main
---n-label-per-class=100
---n-valid-per-class=50
---mismatch-ratio=0.60
---for-what=OPENMATCH
---checkpoint-hash=2023-12-28_13-17-33
---seed=2

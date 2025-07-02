@@ -1,9 +1,0 @@
---gpus=0
---data=cifar100
---server=main
---n-label-per-class=100
---n-valid-per-class=50
---mismatch-ratio=0.60
---for-what=OPENMATCH
---checkpoint-hash=2023-12-28_03-30-36
---seed=2
