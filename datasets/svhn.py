@@ -8,71 +8,94 @@ from torch.utils.data import Dataset
 
 # SVHN
 SVHN_MISMATCH_CONFIG = {
-    'svhn': {'target_classes': [2, 3, 4, 5, 6, 7],
-                 'unknown_classes': [0, 1, 8, 9],
-                 'n_unlabeled': 20000}
+    "svhn": {
+        "target_classes": [2, 3, 4, 5, 6, 7],
+        "unknown_classes": [0, 1, 8, 9],
+        "n_unlabeled": 20000,
     }
+}
 
-def load_SVHN(root: str,
-              data_name: str,
-              n_label_per_class: int,
-              mismatch_ratio,
-              random_state,
-              logger,
-              n_ratio_valid_per_class: float = 0.1):
 
-    assert data_name=='svhn', f"{data_name} is not supported"
+def load_SVHN(
+    root: str,
+    data_name: str,
+    n_label_per_class: int,
+    mismatch_ratio,
+    random_state,
+    logger,
+    n_ratio_valid_per_class: float = 0.1,
+):
+
+    assert data_name == "svhn", f"{data_name} is not supported"
     load_func = torchvision.datasets.svhn.SVHN
 
     CONFIG = SVHN_MISMATCH_CONFIG[data_name]
 
     np.random.seed(random_state)
 
-    target_classes = CONFIG['target_classes']
-    unknown_classes = CONFIG['unknown_classes']
-    n_unlabels = CONFIG['n_unlabeled']
-    
+    target_classes = CONFIG["target_classes"]
+    unknown_classes = CONFIG["unknown_classes"]
+    n_unlabels = CONFIG["n_unlabeled"]
+
     # load dataset
-    train_dataset = load_func(root=root, split='train', download=True)
-    train_index, validation_index = train_test_split(np.arange(len(train_dataset)),
-                                                     train_size = (1-n_ratio_valid_per_class),
-                                                     test_size = n_ratio_valid_per_class,
-                                                     stratify = train_dataset.labels,
-                                                     shuffle = True,
-                                                     random_state = random_state)
-    train_dataset.data = train_dataset.data.transpose(0,2,3,1)
+    train_dataset = load_func(root=root, split="train", download=True)
+    train_index, validation_index = train_test_split(
+        np.arange(len(train_dataset)),
+        train_size=(1 - n_ratio_valid_per_class),
+        test_size=n_ratio_valid_per_class,
+        stratify=train_dataset.labels,
+        shuffle=True,
+        random_state=random_state,
+    )
+    train_dataset.data = train_dataset.data.transpose(0, 2, 3, 1)
 
-    validation_dataset = {'images': np.array(train_dataset.data)[validation_index],
-                          'labels': np.array(train_dataset.labels)[validation_index]}
-    train_dataset = {'images': np.array(train_dataset.data)[train_index],
-                     'labels': np.array(train_dataset.labels)[train_index]}
+    validation_dataset = {
+        "images": np.array(train_dataset.data)[validation_index],
+        "labels": np.array(train_dataset.labels)[validation_index],
+    }
+    train_dataset = {
+        "images": np.array(train_dataset.data)[train_index],
+        "labels": np.array(train_dataset.labels)[train_index],
+    }
 
-    test_dataset = load_func(root=root, split='test', download=True)
-    test_dataset.data = test_dataset.data.transpose(0,2,3,1)
-    test_dataset = {'images': np.array(test_dataset.data),
-                    'labels': np.array(test_dataset.labels)}
+    test_dataset = load_func(root=root, split="test", download=True)
+    test_dataset.data = test_dataset.data.transpose(0, 2, 3, 1)
+    test_dataset = {
+        "images": np.array(test_dataset.data),
+        "labels": np.array(test_dataset.labels),
+    }
 
     # 1. train dataset
     # initialize dataset
-    train_images = train_dataset['images']
-    train_labels = train_dataset['labels']
+    train_images = train_dataset["images"]
+    train_labels = train_dataset["labels"]
 
     l_train_images, l_train_labels = [], []
     u_train_images, u_train_labels = [], []
 
     # target classes: labeled data, partial unlabeled data
-    n_unlabels_per_cls = int(n_unlabels*(1.0-mismatch_ratio)) // len(target_classes)
+    n_unlabels_per_cls = int(n_unlabels * (1.0 - mismatch_ratio)) // len(target_classes)
     for c in target_classes:
         # train
         l_train_images.extend(train_images[train_labels == c][:n_label_per_class])
         l_train_labels.extend(train_labels[train_labels == c][:n_label_per_class])
 
         # unlabel train
-        u_train_images.extend(train_images[train_labels == c][n_label_per_class:n_label_per_class+n_unlabels_per_cls])
-        u_train_labels.extend(train_labels[train_labels == c][n_label_per_class:n_label_per_class+n_unlabels_per_cls])
+        u_train_images.extend(
+            train_images[train_labels == c][
+                n_label_per_class : n_label_per_class + n_unlabels_per_cls
+            ]
+        )
+        u_train_labels.extend(
+            train_labels[train_labels == c][
+                n_label_per_class : n_label_per_class + n_unlabels_per_cls
+            ]
+        )
 
     # unknown_classes: partial unlabeled data
-    n_unlabels_shifts = (n_unlabels - n_unlabels_per_cls*len(target_classes)) // len(unknown_classes)
+    n_unlabels_shifts = (n_unlabels - n_unlabels_per_cls * len(target_classes)) // len(
+        unknown_classes
+    )
     for c in unknown_classes:
         # unlabel train
         u_train_images.extend(train_images[train_labels == c][:n_unlabels_shifts])
@@ -83,59 +106,70 @@ def load_SVHN(root: str,
     u_train_images, u_train_labels = np.array(u_train_images), np.array(u_train_labels)
 
     # to dictioanry
-    l_train_dataset = {'images': l_train_images, 'labels': l_train_labels}
-    u_train_dataset = {'images': u_train_images, 'labels': u_train_labels}
+    l_train_dataset = {"images": l_train_images, "labels": l_train_labels}
+    u_train_dataset = {"images": u_train_images, "labels": u_train_labels}
 
     # check OOD ratio
-    n_in = np.isin(u_train_dataset['labels'], target_classes).sum()
-    n_ood = len(u_train_dataset['labels']) - n_in
-    logger.info(f'[Mismatch={mismatch_ratio}] In: {n_in} vs. OOD : {n_ood}')
+    n_in = np.isin(u_train_dataset["labels"], target_classes).sum()
+    n_ood = len(u_train_dataset["labels"]) - n_in
+    logger.info(f"[Mismatch={mismatch_ratio}] In: {n_in} vs. OOD : {n_ood}")
 
     # 2. validation: only target classes
-    target_indices = np.isin(validation_dataset['labels'], target_classes)
-    validation_dataset = {'images': validation_dataset['images'][target_indices],
-                          'labels': validation_dataset['labels'][target_indices]}
+    target_indices = np.isin(validation_dataset["labels"], target_classes)
+    validation_dataset = {
+        "images": validation_dataset["images"][target_indices],
+        "labels": validation_dataset["labels"][target_indices],
+    }
 
     # 3. test: only target classes
     test_total_dataset = deepcopy(test_dataset)
 
-    target_indices = np.isin(test_dataset['labels'], target_classes)
-    test_dataset = {'images': test_dataset['images'][target_indices],
-                    'labels': test_dataset['labels'][target_indices]}
+    target_indices = np.isin(test_dataset["labels"], target_classes)
+    test_dataset = {
+        "images": test_dataset["images"][target_indices],
+        "labels": test_dataset["labels"][target_indices],
+    }
 
     # convert to 0 ~ target_classes
     convert_target = dict([(k, i) for i, k in enumerate(target_classes)])
-    convert_nontarget = dict([(k, i + len(target_classes)) for i, k in enumerate(unknown_classes)])
+    convert_nontarget = dict(
+        [(k, i + len(target_classes)) for i, k in enumerate(unknown_classes)]
+    )
 
     convert_dict = convert_target.copy()
     convert_dict.update(convert_nontarget)
 
-    l_train_dataset['labels'] = [convert_dict[x] for x in l_train_dataset['labels']]
-    u_train_dataset['labels'] = [convert_dict[x] for x in u_train_dataset['labels']]
-    validation_dataset['labels'] = [convert_dict[x] for x in validation_dataset['labels']]
-    test_dataset['labels'] = [convert_dict[x] for x in test_dataset['labels']]
-    test_total_dataset['labels'] = [convert_dict[x] for x in test_total_dataset['labels']]
+    l_train_dataset["labels"] = [convert_dict[x] for x in l_train_dataset["labels"]]
+    u_train_dataset["labels"] = [convert_dict[x] for x in u_train_dataset["labels"]]
+    validation_dataset["labels"] = [
+        convert_dict[x] for x in validation_dataset["labels"]
+    ]
+    test_dataset["labels"] = [convert_dict[x] for x in test_dataset["labels"]]
+    test_total_dataset["labels"] = [
+        convert_dict[x] for x in test_total_dataset["labels"]
+    ]
 
-    datasets = edict({
-        'l_train': l_train_dataset,
-        'u_train': u_train_dataset,
-        'validation': validation_dataset,
-        'test': test_dataset,
-        'test_total': test_total_dataset
-    })
+    datasets = edict(
+        {
+            "l_train": l_train_dataset,
+            "u_train": u_train_dataset,
+            "validation": validation_dataset,
+            "test": test_dataset,
+            "test_total": test_total_dataset,
+        }
+    )
 
     return datasets, convert_dict
 
+
 class SVHN(Dataset):
-    def __init__(self,
-                 data_name: str,
-                 dataset: dict,
-                 transform: object = None,
-                 **kwargs):
+    def __init__(
+        self, data_name: str, dataset: dict, transform: object = None, **kwargs
+    ):
 
         self.data_name = data_name
-        self.data = dataset['images']
-        self.targets = dataset['labels']
+        self.data = dataset["images"]
+        self.targets = dataset["labels"]
         self.transform = transform
 
     def __getitem__(self, idx):
@@ -147,17 +181,16 @@ class SVHN(Dataset):
 
     def __len__(self):
         return len(self.targets)
-    
+
+
 class SVHN_STRONG(Dataset):
-    def __init__(self,
-                 data_name: str,
-                 dataset: dict,
-                 transform: object = None,
-                 **kwargs):
+    def __init__(
+        self, data_name: str, dataset: dict, transform: object = None, **kwargs
+    ):
 
         self.data_name = data_name
-        self.data = dataset['images']
-        self.targets = dataset['labels']
+        self.data = dataset["images"]
+        self.targets = dataset["labels"]
         self.transform = transform
 
     def __getitem__(self, idx):
@@ -173,19 +206,15 @@ class SVHN_STRONG(Dataset):
 
 
 class Selcted_DATA(Dataset):
-    def __init__(self,
-                 dataset: dict,
-                 name: str,
-                 transform: object = None,
-                 **kwargs):
+    def __init__(self, dataset: dict, name: str, transform: object = None, **kwargs):
 
-        self.data = deepcopy(dataset['images'])
-        self.targets = deepcopy(dataset['labels'])
+        self.data = deepcopy(dataset["images"])
+        self.targets = deepcopy(dataset["labels"])
         self.transform = transform
         self.name = name
-        
+
         self.idx_data = np.arange(len(self.data))
-        
+
         self.data_index = None
         self.targets_index = None
         self.set_index()
@@ -197,7 +226,7 @@ class Selcted_DATA(Dataset):
         else:
             self.data_index = self.data
             self.targets_index = self.targets
-            
+
     def __len__(self):
         return len(self.data_index)
 
@@ -212,60 +241,100 @@ class Selcted_DATA(Dataset):
         return img, target, data_idx
 
     def __getitem__(self, idx):
-        
+
         img, target, data_idx = self.__sample__(idx)
         if self.transform is not None:
             weak_img = self.transform(img)
 
-        if self.name == 'train_lb':
-            return {'idx_lb': data_idx, 'x_lb': weak_img, 'x_lb_w_0': weak_img, 'x_lb_w_1': self.transform(img),'y_lb': target}
-        elif self.name == 'train_ulb':
-            return {'idx_ulb': data_idx, 'x_ulb_w_0': weak_img, 'x_ulb_w_1': self.transform(img), 'y_ulb': target}
-        elif self.name == 'train_ulb_selected':
-            return {'x_ulb_w': weak_img, 'x_ulb_w_1': self.transform(img), 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
-        elif self.name == 'sco_lb':
-            return {'inputs_x': weak_img, 'targets_x': target}
-        elif self.name == 'sco_ulb':
-            return {'inputs_u_w': weak_img, 'inputs_u_s': self.transform.strong_transform(img),
-                    'inputs_all_w':self.transform(img),
-                    'inputs_all_s':self.transform.strong_transform(img),
-                    'targets_u_eval': target}
-        elif self.name == 'ssb_lb':
-            return {"inputs_x_w":weak_img,"inputs_x_s":self.transform.strong_transform(img),
-                    "inputs_x_s2":self.transform.strong_transform(img),"inputs_x":self.transform(img),"targets_x":target}
-        elif self.name == 'ssb_ulb':
-            return {'inputs_u_w': weak_img, 'inputs_u_s': self.transform.strong_transform(img),
-                    'inputs_all_w':self.transform(img),'inputs_all':self.transform(img),
-                    'inputs_all_s':self.transform.strong_transform(img),
-                    'inputs_all_s2':self.transform.strong_transform(img),
-                    'targets_u_gt': target,
-                    'targets_all_u': target}
+        if self.name == "train_lb":
+            return {
+                "idx_lb": data_idx,
+                "x_lb": weak_img,
+                "x_lb_w_0": weak_img,
+                "x_lb_w_1": self.transform(img),
+                "y_lb": target,
+            }
+        elif self.name == "train_ulb":
+            return {
+                "idx_ulb": data_idx,
+                "x_ulb_w_0": weak_img,
+                "x_ulb_w_1": self.transform(img),
+                "y_ulb": target,
+            }
+        elif self.name == "train_ulb_selected":
+            return {
+                "x_ulb_w": weak_img,
+                "x_ulb_w_1": self.transform(img),
+                "x_ulb_s": self.transform.strong_transform(img),
+                "unlabel_y": target,
+            }
+        elif self.name == "sco_lb":
+            return {"inputs_x": weak_img, "targets_x": target}
+        elif self.name == "sco_ulb":
+            return {
+                "inputs_u_w": weak_img,
+                "inputs_u_s": self.transform.strong_transform(img),
+                "inputs_all_w": self.transform(img),
+                "inputs_all_s": self.transform.strong_transform(img),
+                "targets_u_eval": target,
+            }
+        elif self.name == "ssb_lb":
+            return {
+                "inputs_x_w": weak_img,
+                "inputs_x_s": self.transform.strong_transform(img),
+                "inputs_x_s2": self.transform.strong_transform(img),
+                "inputs_x": self.transform(img),
+                "targets_x": target,
+            }
+        elif self.name == "ssb_ulb":
+            return {
+                "inputs_u_w": weak_img,
+                "inputs_u_s": self.transform.strong_transform(img),
+                "inputs_all_w": self.transform(img),
+                "inputs_all": self.transform(img),
+                "inputs_all_s": self.transform.strong_transform(img),
+                "inputs_all_s2": self.transform.strong_transform(img),
+                "targets_u_gt": target,
+                "targets_all_u": target,
+            }
         else:
             raise ValueError
+
 
 class ACR(Dataset):
-    def __init__(self,
-                 labelset: dict,
-                 unlabelset: dict,
-                 name: str,
-                 transform: object = None,
-                 **kwargs):
+    def __init__(
+        self,
+        labelset: dict,
+        unlabelset: dict,
+        name: str,
+        transform: object = None,
+        **kwargs,
+    ):
 
-        if name == 'lb':
-            self.data = deepcopy(labelset['images'])
-            self.targets = deepcopy(labelset['labels'])
-        elif name =='ulb':
-            tot_images = np.concatenate([deepcopy(labelset['images']), deepcopy(unlabelset['images'])],axis=0)
-            tot_labels = [-2 for _ in range(labelset['labels'].__len__())] + deepcopy(unlabelset['labels'])
-            self.data, _, self.targets, _ = train_test_split(tot_images, tot_labels, train_size=unlabelset['images'].shape[0], stratify=tot_labels)
+        if name == "lb":
+            self.data = deepcopy(labelset["images"])
+            self.targets = deepcopy(labelset["labels"])
+        elif name == "ulb":
+            tot_images = np.concatenate(
+                [deepcopy(labelset["images"]), deepcopy(unlabelset["images"])], axis=0
+            )
+            tot_labels = [-2 for _ in range(labelset["labels"].__len__())] + deepcopy(
+                unlabelset["labels"]
+            )
+            self.data, _, self.targets, _ = train_test_split(
+                tot_images,
+                tot_labels,
+                train_size=unlabelset["images"].shape[0],
+                stratify=tot_labels,
+            )
         else:
             pass
-            
+
         self.transform = transform
         self.name = name
-        
+
         self.idx_data = np.arange(len(self.data))
-        
+
         self.data_index = None
         self.targets_index = None
         self.set_index()
@@ -277,7 +346,7 @@ class ACR(Dataset):
         else:
             self.data_index = self.data
             self.targets_index = self.targets
-            
+
     def __len__(self):
         return len(self.data_index)
 
@@ -292,30 +361,33 @@ class ACR(Dataset):
         return img, target, data_idx
 
     def __getitem__(self, idx):
-        
+
         img, target, data_idx = self.__sample__(idx)
         if self.transform is not None:
             weak_img = self.transform(img)
 
-        if self.name == 'lb':
-            return {'idx_lb': data_idx, 'inputs_x': weak_img, 'targets_x': target}
-        elif self.name == 'ulb':
-            return {'idx_ulb': data_idx, 'inputs_u_w': weak_img, 'inputs_u_s': self.transform.strong_transform(img), 'inputs_u_s1': self.transform.strong_transform(img), 'u_real': target}
+        if self.name == "lb":
+            return {"idx_lb": data_idx, "inputs_x": weak_img, "targets_x": target}
+        elif self.name == "ulb":
+            return {
+                "idx_ulb": data_idx,
+                "inputs_u_w": weak_img,
+                "inputs_u_s": self.transform.strong_transform(img),
+                "inputs_u_s1": self.transform.strong_transform(img),
+                "u_real": target,
+            }
         else:
             raise ValueError
 
-class Selcted_DATA_Proposed(Dataset):
-    def __init__(self,
-                 dataset: dict,
-                 name: str,
-                 transform: object = None,
-                 **kwargs):
 
-        self.data = deepcopy(dataset['images'])
-        self.targets = deepcopy(dataset['labels'])
+class Selcted_DATA_Proposed(Dataset):
+    def __init__(self, dataset: dict, name: str, transform: object = None, **kwargs):
+
+        self.data = deepcopy(dataset["images"])
+        self.targets = deepcopy(dataset["labels"])
         self.transform = transform
         self.name = name
-        
+
         self.idx = np.arange(len(self.data))
 
         self.data_index = None
@@ -331,7 +403,7 @@ class Selcted_DATA_Proposed(Dataset):
             self.data_index = self.data
             self.targets_index = self.targets
             self.idx_index = self.idx
-            
+
     def __len__(self):
         return len(self.data_index)
 
@@ -346,54 +418,66 @@ class Selcted_DATA_Proposed(Dataset):
         return img, target, data_idx
 
     def __getitem__(self, idx):
-        
+
         img, target, data_idx = self.__sample__(idx)
         if self.transform is not None:
             weak_img = self.transform(img)
 
-        if self.name == 'train_lb':
-            return {'idx_lb': data_idx, 'x_lb': weak_img, 'y_lb': target}
-        elif self.name == 'train_ulb':
-            return {'idx_ulb': data_idx, 'x_ulb_w': weak_img, 'x_ulb_w_t': self.transform(img), 'x_ulb_s': self.transform.strong_transform(img), 'y_ulb': target}
-        elif self.name == 'train_ulb_selected':
-            return {'x_ulb_w': weak_img, 'x_ulb_s': self.transform.strong_transform(img), 'unlabel_y': target}
+        if self.name == "train_lb":
+            return {"idx_lb": data_idx, "x_lb": weak_img, "y_lb": target}
+        elif self.name == "train_ulb":
+            return {
+                "idx_ulb": data_idx,
+                "x_ulb_w": weak_img,
+                "x_ulb_w_t": self.transform(img),
+                "x_ulb_s": self.transform.strong_transform(img),
+                "y_ulb": target,
+            }
+        elif self.name == "train_ulb_selected":
+            return {
+                "x_ulb_w": weak_img,
+                "x_ulb_s": self.transform.strong_transform(img),
+                "unlabel_y": target,
+            }
         else:
             raise ValueError
-        
-        
+
+
 class MTC_DATASET(Dataset):
-    def __init__(self,
-                 data_name: str,
-                 dataset: dict,
-                 len_label,
-                 transform: object = None,
-                 **kwargs):
+    def __init__(
+        self,
+        data_name: str,
+        dataset: dict,
+        len_label,
+        transform: object = None,
+        **kwargs,
+    ):
 
         self.data_name = data_name
-        self.data = dataset['images']
-        self.targets = dataset['labels']
+        self.data = dataset["images"]
+        self.targets = dataset["labels"]
         self.transform = transform
 
         # Labeled data : 1 / Unlabeled data : 0 <--> match data : 1 / mismatch data : 0
         self.len_label = len_label
         self.soft_labels = np.zeros((len(self.data)))
         self.soft_labels[:len_label] = 1
-        
+
         self.prediction = np.zeros((len(self.data), 10), dtype=np.float32)
-        self.prediction[:self.len_label,:] = 1.0
+        self.prediction[: self.len_label, :] = 1.0
         self.count = 0
 
     def label_update(self, results):
 
         self.count += 1
-        
+
         idx = (self.count - 1) % 10
-        self.prediction[self.len_label:, idx] = results[self.len_label:].cpu().numpy()
-        
+        self.prediction[self.len_label :, idx] = results[self.len_label :].cpu().numpy()
+
         if self.count >= 10:
             self.soft_labels = self.prediction.mean(axis=1)
         else:
-            self.soft_labels[self.len_label:] = self.prediction[self.len_label:, idx]
+            self.soft_labels[self.len_label :] = self.prediction[self.len_label :, idx]
 
     def __getitem__(self, idx):
         img, target = self.data[idx], self.targets[idx]

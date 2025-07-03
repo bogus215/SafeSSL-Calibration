@@ -20,16 +20,13 @@ from utils.logging import get_rich_logger
 from utils.wandb import configure_wandb
 
 NUM_CLASSES = {
-    'cifar10': 6,
-    'cifar100': 50,
-    'svhn': 6,
-    'tiny': 100,
+    "cifar10": 6,
+    "cifar100": 50,
+    "svhn": 6,
+    "tiny": 100,
 }
 
-AUGMENTS = {
-    'semi': SemiAugment,
-    'test': TestAugment
-}
+AUGMENTS = {"semi": SemiAugment, "test": TestAugment}
 
 
 def main():
@@ -49,6 +46,7 @@ def main():
     rich.print("Single GPU training.")
     main_worker(0, config=config)  # single machine, single gpu
 
+
 def main_worker(local_rank: int, config: object):
     """Single process."""
 
@@ -56,86 +54,165 @@ def main_worker(local_rank: int, config: object):
     num_classes = NUM_CLASSES[config.data]
 
     # Networks
-    if config.backbone_type in ['wide28_10',"wide28_2"]:
-        model = WRN(width=int(config.backbone_type.split("_")[-1]), num_classes=num_classes)
-    elif config.backbone_type == 'densenet121':
-        model = densenet121(num_class=num_classes) 
-    elif config.backbone_type == 'vgg16_bn':
+    if config.backbone_type in ["wide28_10", "wide28_2"]:
+        model = WRN(
+            width=int(config.backbone_type.split("_")[-1]), num_classes=num_classes
+        )
+    elif config.backbone_type == "densenet121":
+        model = densenet121(num_class=num_classes)
+    elif config.backbone_type == "vgg16_bn":
         model = vgg16_bn(num_class=num_classes)
-    elif config.backbone_type == 'inceptionv4':
+    elif config.backbone_type == "inceptionv4":
         model = inceptionv4(class_nums=num_classes)
     else:
         raise NotImplementedError
 
     # create logger
     if local_rank == 0:
-        logfile = os.path.join(config.checkpoint_dir, 'main.log')
+        logfile = os.path.join(config.checkpoint_dir, "main.log")
         logger = get_rich_logger(logfile=logfile)
         if config.enable_wandb:
             configure_wandb(
-                name=f'{config.task} : {config.hash}',
-                project=f'SafeSSL-Calibration-{config.data}-{config.task}',
-                config=config
+                name=f"{config.task} : {config.hash}",
+                project=f"SafeSSL-Calibration-{config.data}-{config.task}",
+                config=config,
             )
     else:
         logger = None
 
     # Sub-Network Plus
     import torch.nn as nn
-    setattr(model,'ova_classifiers', nn.Linear(model.output.in_features,int(model.class_num*2), bias=False))
+
+    setattr(
+        model,
+        "ova_classifiers",
+        nn.Linear(model.output.in_features, int(model.class_num * 2), bias=False),
+    )
 
     initialize_weights(model)
-    
+
     # Data (transforms & datasets)
-    trans_kwargs = dict(size=config.input_size, data=config.data, impl=config.augmentation)
+    trans_kwargs = dict(
+        size=config.input_size, data=config.data, impl=config.augmentation
+    )
     train_trans = AUGMENTS[config.train_augment](**trans_kwargs)
     test_trans = AUGMENTS[config.test_augment](**trans_kwargs)
 
-    if config.data in ['cifar10', 'cifar100']:
+    if config.data in ["cifar10", "cifar100"]:
 
-        datasets, _ = load_CIFAR(root=config.root,data_name=config.data,n_valid_per_class=config.n_valid_per_class,seed=config.seed, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio, logger=logger)
+        datasets, _ = load_CIFAR(
+            root=config.root,
+            data_name=config.data,
+            n_valid_per_class=config.n_valid_per_class,
+            seed=config.seed,
+            n_label_per_class=config.n_label_per_class,
+            mismatch_ratio=config.mismatch_ratio,
+            logger=logger,
+        )
 
-        labeled_set = Selcted_DATA(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
-        unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+        labeled_set = Selcted_DATA(
+            dataset=datasets["l_train"], transform=train_trans, name="train_lb"
+        )
+        unlabeled_set = Selcted_DATA(
+            dataset=datasets["u_train"], name="train_ulb", transform=train_trans
+        )
+        selcted_unlabeled_set = Selcted_DATA(
+            dataset=datasets["u_train"],
+            name="train_ulb_selected",
+            transform=train_trans,
+        )
 
-        eval_set = CIFAR(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
-        test_set = CIFAR(data_name=config.data, dataset=datasets['test'], transform=test_trans)
-        open_test_set = CIFAR(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
-    
-    elif config.data == 'tiny':
-        
-        datasets, _ = load_tiny(root=config.root, n_label_per_class=config.n_label_per_class,n_valid_per_class=config.n_valid_per_class,mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
+        eval_set = CIFAR(
+            data_name=config.data, dataset=datasets["validation"], transform=test_trans
+        )
+        test_set = CIFAR(
+            data_name=config.data, dataset=datasets["test"], transform=test_trans
+        )
+        open_test_set = CIFAR(
+            data_name=config.data, dataset=datasets["test_total"], transform=test_trans
+        )
 
-        labeled_set = Selcted_DATA(dataset=datasets['l_train'], transform=train_trans, name='train_lb')
-        unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
-        
-        eval_set = TinyImageNet(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
-        test_set = TinyImageNet(data_name=config.data, dataset=datasets['test'], transform=test_trans)
-        open_test_set = TinyImageNet(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
-    
-    elif config.data == 'svhn':
-        
-        datasets, _ = load_SVHN(root=config.root, data_name=config.data, n_label_per_class=config.n_label_per_class, mismatch_ratio=config.mismatch_ratio,random_state=config.seed,logger=logger)
+    elif config.data == "tiny":
 
-        labeled_set = Selcted_DATA(data_name=config.data, dataset=datasets['l_train'], name='train_lb',transform=train_trans)
-        unlabeled_set = Selcted_DATA(data_name=config.data, dataset=datasets['u_train'], name='train_ulb',transform=train_trans)
-        selcted_unlabeled_set = Selcted_DATA(dataset=datasets['u_train'], name='train_ulb_selected',transform=train_trans)
+        datasets, _ = load_tiny(
+            root=config.root,
+            n_label_per_class=config.n_label_per_class,
+            n_valid_per_class=config.n_valid_per_class,
+            mismatch_ratio=config.mismatch_ratio,
+            random_state=config.seed,
+            logger=logger,
+        )
 
-        eval_set = SVHN(data_name=config.data, dataset=datasets['validation'], transform=test_trans)
-        test_set = SVHN(data_name=config.data, dataset=datasets['test'], transform=test_trans)
-        open_test_set = SVHN(data_name=config.data, dataset=datasets['test_total'], transform=test_trans)
-    
+        labeled_set = Selcted_DATA(
+            dataset=datasets["l_train"], transform=train_trans, name="train_lb"
+        )
+        unlabeled_set = Selcted_DATA(
+            dataset=datasets["u_train"], name="train_ulb", transform=train_trans
+        )
+        selcted_unlabeled_set = Selcted_DATA(
+            dataset=datasets["u_train"],
+            name="train_ulb_selected",
+            transform=train_trans,
+        )
+
+        eval_set = TinyImageNet(
+            data_name=config.data, dataset=datasets["validation"], transform=test_trans
+        )
+        test_set = TinyImageNet(
+            data_name=config.data, dataset=datasets["test"], transform=test_trans
+        )
+        open_test_set = TinyImageNet(
+            data_name=config.data, dataset=datasets["test_total"], transform=test_trans
+        )
+
+    elif config.data == "svhn":
+
+        datasets, _ = load_SVHN(
+            root=config.root,
+            data_name=config.data,
+            n_label_per_class=config.n_label_per_class,
+            mismatch_ratio=config.mismatch_ratio,
+            random_state=config.seed,
+            logger=logger,
+        )
+
+        labeled_set = Selcted_DATA(
+            data_name=config.data,
+            dataset=datasets["l_train"],
+            name="train_lb",
+            transform=train_trans,
+        )
+        unlabeled_set = Selcted_DATA(
+            data_name=config.data,
+            dataset=datasets["u_train"],
+            name="train_ulb",
+            transform=train_trans,
+        )
+        selcted_unlabeled_set = Selcted_DATA(
+            dataset=datasets["u_train"],
+            name="train_ulb_selected",
+            transform=train_trans,
+        )
+
+        eval_set = SVHN(
+            data_name=config.data, dataset=datasets["validation"], transform=test_trans
+        )
+        test_set = SVHN(
+            data_name=config.data, dataset=datasets["test"], transform=test_trans
+        )
+        open_test_set = SVHN(
+            data_name=config.data, dataset=datasets["test_total"], transform=test_trans
+        )
+
     else:
         raise NotImplementedError
 
     if local_rank == 0:
-        logger.info(f'Data: {config.data}')
-        logger.info(f'Labeled Data Observations: {len(labeled_set):,}')
-        logger.info(f'Unlabeled Data Observations: {len(unlabeled_set):,}')
-        logger.info(f'Backbone: {config.backbone_type}')
-        logger.info(f'Checkpoint directory: {config.checkpoint_dir}')
+        logger.info(f"Data: {config.data}")
+        logger.info(f"Labeled Data Observations: {len(labeled_set):,}")
+        logger.info(f"Unlabeled Data Observations: {len(unlabeled_set):,}")
+        logger.info(f"Backbone: {config.backbone_type}")
+        logger.info(f"Checkpoint directory: {config.checkpoint_dir}")
 
     # Model (Task)
     model = Classification(backbone=model)
@@ -148,8 +225,8 @@ def main_worker(local_rank: int, config: object):
         num_workers=config.num_workers,
         local_rank=local_rank,
         mixed_precision=config.mixed_precision,
-        gamma = config.gamma,
-        milestones= config.milestones,
+        gamma=config.gamma,
+        milestones=config.milestones,
         weight_decay=config.weight_decay,
         smoothingalpha=config.alpha,
     )
@@ -157,7 +234,7 @@ def main_worker(local_rank: int, config: object):
     # Train & evaluate
     start = time.time()
     model.run(
-        train_set=[labeled_set,unlabeled_set,selcted_unlabeled_set],
+        train_set=[labeled_set, unlabeled_set, selcted_unlabeled_set],
         eval_set=eval_set,
         test_set=test_set,
         p_cutoff=config.p_cutoff,
@@ -168,16 +245,17 @@ def main_worker(local_rank: int, config: object):
         lambda_em=config.lambda_em,
         lambda_socr=config.lambda_socr,
         enable_plot=config.enable_plot,
-        logger=logger
+        logger=logger,
     )
     elapsed_sec = time.time() - start
 
     if logger is not None:
         elapsed_mins = elapsed_sec / 60
-        logger.info(f'Total training time: {elapsed_mins:,.2f} minutes.')
+        logger.info(f"Total training time: {elapsed_mins:,.2f} minutes.")
         logger.handlers.clear()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
 
     try:
         main()

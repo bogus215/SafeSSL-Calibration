@@ -1,5 +1,6 @@
 import wandb
 
+
 def configure_wandb(name: str, project: str, config: object):
     wandb.init(
         name=name,

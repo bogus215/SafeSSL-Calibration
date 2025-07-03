@@ -7,7 +7,9 @@ from rich.logging import RichHandler
 from rich.progress import Progress
 
 
-def make_epoch_description(history: dict, current: int, total: int, best: int, exclude: list = []):
+def make_epoch_description(
+    history: dict, current: int, total: int, best: int, exclude: list = []
+):
     """Create description string for logging progress."""
     pfmt = f">{len(str(total))}d"
     desc = f" Epoch: [{current:{pfmt}}/{total:{pfmt}}] ({best:{pfmt}}) |"
@@ -23,12 +25,8 @@ def make_epoch_description(history: dict, current: int, total: int, best: int, e
 
 def get_rich_pbar(transient: bool = True, auto_refresh: bool = False):
     """A colorful progress bar based on the `rich` python library."""
-    console = Console(color_system='256', force_terminal=True, width=160)
-    return Progress(
-        console=console,
-        auto_refresh=auto_refresh,
-        transient=transient
-    )
+    console = Console(color_system="256", force_terminal=True, width=160)
+    return Progress(console=console, auto_refresh=auto_refresh, transient=transient)
 
 
 def get_rich_logger(logfile: str = None, level=logging.INFO):
@@ -40,12 +38,14 @@ def get_rich_logger(logfile: str = None, level=logging.INFO):
     if logfile is not None:
         touch(logfile)
         fileHandler = logging.FileHandler(logfile)
-        fileHandler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)-5.5s] %(message)s"))
+        fileHandler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)-5.5s] %(message)s")
+        )
         myLogger.addHandler(fileHandler)
 
     # Rich handler
     width, _ = shutil.get_terminal_size()
-    console = Console(color_system='256', width=width)
+    console = Console(color_system="256", width=width)
     richHandler = RichHandler(console=console)
     richHandler.setFormatter(logging.Formatter("%(message)s"))
     myLogger.addHandler(richHandler)
@@ -83,8 +83,8 @@ def get_logger(stream=False, logfile=None, level=logging.INFO):
     return rootLogger
 
 
-def touch(filepath: str, mode: str='w'):
-    assert mode in ['a', 'w']
+def touch(filepath: str, mode: str = "w"):
+    assert mode in ["a", "w"]
     directory, _ = os.path.split(os.path.abspath(filepath))
     os.makedirs(directory, exist_ok=True)
     open(filepath, mode).close()

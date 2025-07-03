@@ -30,9 +30,9 @@ class Task(object):
     @staticmethod
     def move_optimizer_states(optimizer: torch.optim.Optimizer, device: int = 0):
         for state in optimizer.state.values():  # dict; state of parameters
-            for k, v in state.items():          # iterate over paramteters (k=name, v=tensor)
-                if torch.is_tensor(v):          # If a tensor,
-                    state[k] = v.to(device)     # configure appropriate device
+            for k, v in state.items():  # iterate over paramteters (k=name, v=tensor)
+                if torch.is_tensor(v):  # If a tensor,
+                    state[k] = v.to(device)  # configure appropriate device
 
     @staticmethod
     def freeze_params(net: nn.Module):

@@ -1,7 +1,5 @@
-import albumentations as A
 from torchvision import transforms
 from datasets.transforms.base import ImageAugment
-from datasets.transforms.albumentations import NumpyToTensor
 import torch
 from datasets.transforms.randaugment import RandAugmentMC
 
@@ -13,13 +11,9 @@ class SemiAugment(ImageAugment):
                  **kwargs):
         super(SemiAugment, self).__init__(size, data, impl)
 
-        if self.impl == 'torchvision':
-            self.transform = self.with_torchvision()
-            self.strong_transform = self.with_strong_torchvision()
-            self.raw_transform = self.with_raw_torchvision()
-            
-        elif self.impl == 'albumentations':
-            raise NotImplementedError()
+        self.transform = self.with_torchvision()
+        self.strong_transform = self.with_strong_torchvision()
+        self.raw_transform = self.with_raw_torchvision()
 
     def with_torchvision(self):
 
@@ -42,7 +36,7 @@ class SemiAugment(ImageAugment):
             transforms.ToPILImage(),
             transforms.RandomHorizontalFlip(),
             transforms.RandomCrop(size=self.size, padding=4, padding_mode='reflect'),
-            RandAugmentMC(n=2, m=10),
+            RandAugmentMC(n=2, m=10, img_size=self.size),
             transforms.ToTensor(),
             transforms.Normalize(self.mean, self.std),
         ]
@@ -67,10 +61,7 @@ class TestAugment(ImageAugment):
                  **kwargs):
         super(TestAugment, self).__init__(size, data, impl)
 
-        if self.impl == 'torchvision':
-            self.transform = self.with_torchvision()
-        elif self.impl == 'albumentations':
-            self.transform = self.with_albumentations()
+        self.transform = self.with_torchvision()
 
     def with_torchvision(self):
         transform = [
@@ -79,13 +70,6 @@ class TestAugment(ImageAugment):
             transforms.Normalize(self.mean, self.std)
         ]
         return transforms.Compose(transform)
-
-    def with_albumentations(self):
-        transform = [
-            A.Normalize(self.mean, self.std, always_apply=True),
-            NumpyToTensor()
-        ]
-        return A.Compose(transform)
     
 class GaussianNoise(object):
     def __init__(self, mean=0., std=0.15):

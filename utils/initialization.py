@@ -1,13 +1,13 @@
 import torch.nn as nn
 
 
-def initialize_weights(model: nn.Module, activation: str = 'relu'):
+def initialize_weights(model: nn.Module, activation: str = "relu"):
     """Initialize trainable weights."""
 
     for _, m in model.named_modules():
 
         if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
-            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity=activation)
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity=activation)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
 

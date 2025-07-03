@@ -3,9 +3,9 @@ CIFAR100_SEEDS=(1 2 5 6 10)
 TINY_SEEDS=(1 2 5 6 10)
 SVHN_SEEDS=(1 2 5 6 10)
 
-for seed in 0
+for seed in 0 1 2 3 4
 do
-    for ratio in 0.3
+    for ratio in 0.3 0.6
     do
         python ./main/run_ACR.py --gpus 0 --seed ${TINY_SEEDS[$seed]} \
                                     --data tiny --server main \
