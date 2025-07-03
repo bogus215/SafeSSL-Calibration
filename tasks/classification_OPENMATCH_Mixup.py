@@ -14,7 +14,8 @@ from torch.utils.tensorboard import SummaryWriter
 from tasks.classification import Classification as Task
 from utils import TopKAccuracy
 from utils.logging import make_epoch_description
-from utils.optimization import WeightSWA, get_multi_step_scheduler, get_optimizer
+from utils.optimization import (WeightSWA, get_multi_step_scheduler,
+                                get_optimizer)
 
 
 class Classification(Task):

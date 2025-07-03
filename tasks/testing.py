@@ -1662,13 +1662,8 @@ class ImageNetTesting(Testing):
 
         from ffcv.fields.decoders import CenterCropRGBImageDecoder, IntDecoder
         from ffcv.loader import Loader, OrderOption
-        from ffcv.transforms import (
-            NormalizeImage,
-            Squeeze,
-            ToDevice,
-            ToTensor,
-            ToTorchImage,
-        )
+        from ffcv.transforms import (NormalizeImage, Squeeze, ToDevice,
+                                     ToTensor, ToTorchImage)
 
         label_pipeline = [
             IntDecoder(),

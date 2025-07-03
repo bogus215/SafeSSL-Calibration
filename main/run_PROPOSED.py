@@ -19,7 +19,6 @@ from datasets.transforms import SemiAugment, TestAugment
 from models import WRN, ResNet50, ViT
 from tasks.classification_Proposed import Classification
 from utils.gpu import set_gpu
-from utils.initialization import initialize_weights
 from utils.logging import get_rich_logger
 from utils.wandb import configure_wandb
 
@@ -113,10 +112,8 @@ def main_worker(local_rank: int, config: object):
     setattr(
         model,
         "ova_classifiers",
-        nn.Linear(model.output.in_features, int(model.class_num * 2), bias=False),
+        nn.Linear(model.in_features, int(model.class_num * 2), bias=False),
     )
-
-    initialize_weights(model)
 
     # Data (transforms & datasets)
     trans_kwargs = dict(
@@ -134,6 +131,7 @@ def main_worker(local_rank: int, config: object):
             seed=config.seed,
             n_label_per_class=config.n_label_per_class,
             mismatch_ratio=config.mismatch_ratio,
+            input_size=config.input_size,
             logger=logger,
         )
 

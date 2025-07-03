@@ -532,24 +532,14 @@ class ImageNetClassification(Classification):
 
         distributed = kwargs.get("distributed")
 
-        from ffcv.fields.decoders import (
-            CenterCropRGBImageDecoder,
-            IntDecoder,
-            RandomResizedCropRGBImageDecoder,
-        )
+        from ffcv.fields.decoders import (CenterCropRGBImageDecoder,
+                                          IntDecoder,
+                                          RandomResizedCropRGBImageDecoder)
         from ffcv.loader import Loader, OrderOption
-        from ffcv.transforms import (
-            Cutout,
-            NormalizeImage,
-            RandomColorJitter,
-            RandomGrayscale,
-            RandomHorizontalFlip,
-            RandomSolarization,
-            Squeeze,
-            ToDevice,
-            ToTensor,
-            ToTorchImage,
-        )
+        from ffcv.transforms import (Cutout, NormalizeImage, RandomColorJitter,
+                                     RandomGrayscale, RandomHorizontalFlip,
+                                     RandomSolarization, Squeeze, ToDevice,
+                                     ToTensor, ToTorchImage)
 
         label_pipeline = [
             IntDecoder(),

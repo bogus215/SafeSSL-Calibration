@@ -16,7 +16,8 @@ plt.style.use("bmh")
 from tasks.base import Task
 from utils import RandomSampler, TopKAccuracy
 from utils.logging import make_epoch_description
-from utils.optimization import WeightSWA, get_multi_step_scheduler, get_optimizer
+from utils.optimization import (WeightSWA, get_multi_step_scheduler,
+                                get_optimizer)
 
 
 class Classification(Task):
@@ -754,20 +755,12 @@ class ImageNetClassification(Classification):
 
         distributed = kwargs.get("distributed")
 
-        from ffcv.fields.decoders import (
-            CenterCropRGBImageDecoder,
-            IntDecoder,
-            RandomResizedCropRGBImageDecoder,
-        )
+        from ffcv.fields.decoders import (CenterCropRGBImageDecoder,
+                                          IntDecoder,
+                                          RandomResizedCropRGBImageDecoder)
         from ffcv.loader import Loader, OrderOption
-        from ffcv.transforms import (
-            NormalizeImage,
-            RandomHorizontalFlip,
-            Squeeze,
-            ToDevice,
-            ToTensor,
-            ToTorchImage,
-        )
+        from ffcv.transforms import (NormalizeImage, RandomHorizontalFlip,
+                                     Squeeze, ToDevice, ToTensor, ToTorchImage)
 
         label_pipeline = [
             IntDecoder(),

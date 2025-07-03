@@ -166,6 +166,7 @@ class ConfigBase(object):
                 "vgg16_bn",
                 "inceptionv4",
                 "resnet50",
+                "vit"
             ),
         )
         parser.add_argument(

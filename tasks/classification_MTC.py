@@ -7,7 +7,8 @@ import torch.distributed as dist
 import torch.nn as nn
 from rich.progress import Progress
 from skimage.filters import threshold_otsu
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import (accuracy_score, f1_score, precision_score,
+                             recall_score)
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import Sampler
 

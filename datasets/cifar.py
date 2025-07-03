@@ -3,8 +3,26 @@ from copy import deepcopy
 import numpy as np
 import torchvision
 from easydict import EasyDict as edict
+from PIL import Image
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
+from tqdm import tqdm
+
+
+def resize_images(images, size=(224, 224)):
+    """
+    images: numpy array of shape (N, H, W, C)
+    size: target size (width, height)
+    """
+    resized_images = []
+
+    for img in tqdm(images, desc="Resizing input images to {}".format(size)):
+        pil_img = Image.fromarray(img)  # NumPy -> PIL
+        resized_img = pil_img.resize(size, Image.BILINEAR)  # Resize
+        resized_images.append(np.array(resized_img))  # PIL -> NumPy
+
+    return np.stack(resized_images)
+
 
 # CIFAR-10
 CIFAR_MISMATCH_CONFIG = {
@@ -33,6 +51,7 @@ def load_CIFAR(
     n_valid_per_class: int,
     mismatch_ratio,
     logger,
+    input_size,
     **kwargs,
 ):
 
@@ -56,6 +75,10 @@ def load_CIFAR(
 
     # load dataset
     train_dataset = load_func(root=root, train=True, download=True)
+    if train_dataset.data.shape[1] != input_size:
+        train_dataset.data = resize_images(
+            train_dataset.data, size=(input_size, input_size)
+        )
     train_index, validation_index = train_test_split(
         np.arange(len(train_dataset)),
         test_size=n_valid_per_class * num_classes,
@@ -74,6 +97,10 @@ def load_CIFAR(
     }
 
     test_dataset = load_func(root=root, train=False, download=True)
+    if test_dataset.data.shape[1] != input_size:
+        test_dataset.data = resize_images(
+            test_dataset.data, size=(input_size, input_size)
+        )
     test_dataset = {
         "images": np.array(test_dataset.data),
         "labels": np.array(test_dataset.targets),

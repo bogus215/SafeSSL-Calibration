@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 from rich.progress import Progress
 from sklearn.manifold import TSNE
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import (accuracy_score, f1_score, precision_score,
+                             recall_score)
 from torch.utils.data import DataLoader
 
 from tasks.classification import Classification as Task

@@ -12,4 +12,6 @@
 --weight-decay=0
 --lambda-ova-cali=0.1
 --lambda-ova=0.1
---start-fix=0
+--start-fix=2
+--input-size=224
+--backbone-type=vit
