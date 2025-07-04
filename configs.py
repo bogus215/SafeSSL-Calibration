@@ -175,6 +175,12 @@ class ConfigBase(object):
             default=None,
             help="Path to checkpoint file to resume training from.",
         )
+        parser.add_argument(
+            "--normalize",
+            action="store_true",
+            help="L2 Normalize."
+        )
+
         return parser
 
     @staticmethod
@@ -420,7 +426,6 @@ class ProposedConfig(ConfigBase):
             default=30,
             help="Expected calibration error, n-bins in AcatS.",
         )
-        parser.add_argument("--normalize", action="store_true", help="L2 Normalize.")
         parser.add_argument("--start-fix", type=int, default=5)
 
         parser.add_argument("--lambda-cali", type=float, default=1)
@@ -466,7 +471,6 @@ class ProposedPlusConfig(ConfigBase):
             default=30,
             help="Expected calibration error, n-bins in AcatS.",
         )
-        parser.add_argument("--normalize", action="store_true", help="L2 Normalize.")
         parser.add_argument("--start-fix", type=int, default=5)
 
         parser.add_argument("--lambda-cali", type=float, default=1)
@@ -505,7 +509,6 @@ class Ablation1Config(ConfigBase):
         )
 
         parser.add_argument("--tau", type=float, default=0.95)
-        parser.add_argument("--normalize", action="store_true", help="L2 Normalize.")
         parser.add_argument("--start-fix", type=int, default=5)
         parser.add_argument(
             "--train-n-bins",
@@ -555,7 +558,6 @@ class Ablation2Config(ConfigBase):
             default=30,
             help="Expected calibration error, n-bins in AcatS.",
         )
-        parser.add_argument("--normalize", action="store_true", help="L2 Normalize.")
         parser.add_argument("--start-fix", type=int, default=5)
 
         parser.add_argument("--lambda-cali", type=float, default=1)
@@ -593,7 +595,6 @@ class Ablation3Config(ConfigBase):
         )
 
         parser.add_argument("--tau", type=float, default=0.95)
-        parser.add_argument("--normalize", action="store_true", help="L2 Normalize.")
         parser.add_argument("--start-fix", type=int, default=5)
 
         parser.add_argument("--lambda-ova-soft", type=float, default=5e-1)
@@ -1148,7 +1149,6 @@ class TestingConfig(ConfigBase):
             "--checkpoint-hash", type=str, default="2023-01-12_03-30-35", help=""
         )
         parser.add_argument("--for-what", type=str, default="Proposed", required=True)
-        parser.add_argument("--normalize", action="store_true", help="L2 Normalize.")
         parser.add_argument("--safe-student-T", type=float, default=1.5)
         parser.add_argument("--ova-pi", type=float, default=0.5)
 
@@ -1193,7 +1193,6 @@ class MTcConfig(ConfigBase):
             default="test",
             choices=("finetune", "test", "semi"),
         )
-        parser.add_argument("--normalize", action="store_true", help="L2 Normalize.")
         parser.add_argument("--tau", type=float, default=0.95)
         parser.add_argument("--T", type=float, default=0.5)
         parser.add_argument("--alpha", type=float, default=0.75)
@@ -1236,7 +1235,6 @@ class SafeStudentConfig(ConfigBase):
         parser.add_argument(
             "--lambda-two", type=float, default=0.01, help="coefficient for UCD loss"
         )
-        parser.add_argument("--normalize", action="store_true", help="L2 Normalize.")
         parser.add_argument("--ema-factor", type=float, default=0.996)
         parser.add_argument("--pretrain-train-split", type=int, default=5, help="")
 

@@ -303,11 +303,11 @@ def main_worker(local_rank: int, config: object):
         logger.info(f"Checkpoint directory: {config.checkpoint_dir}")
 
     # Model (Task)
-    if config.data == "imagenet":
-        model = ImageNetClassification(backbone=model)
-    else:
-        model = Classification(backbone=model)
-
+    model = (
+        Classification(backbone=model)
+        if config.data != "imagenet"
+        else ImageNetClassification(backbone=model)
+    )
     model.prepare(
         ckpt_dir=config.checkpoint_dir,
         optimizer=config.optimizer,

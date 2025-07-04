@@ -15,5 +15,31 @@ do
                                     --save-every 5000 --learning-rate 3e-3 \
                                     --backbone-type wide28_2 --optimizer adam \
                                     --weight-decay 0 --warm-up 1
+
+        python ./main/run_ACR.py --gpus 0 --seed ${CIFAR10_SEEDS[$seed]} \
+                                    --data cifar10 --server main \
+                                    --n-label-per-class 400 \
+                                    --n-valid-per-class 500 \
+                                    --mismatch-ratio $ratio --mixed-precision \
+                                    --save-every 5000 --learning-rate 3e-3 \
+                                    --backbone-type wide28_2 --optimizer adam \
+                                    --weight-decay 0 --warm-up 1
+
+        python ./main/run_ACR.py --gpus 0 --seed ${CIFAR100_SEEDS[$seed]} \
+                                    --data cifar100 --server main \
+                                    --n-label-per-class 100 \
+                                    --n-valid-per-class 50 \
+                                    --mismatch-ratio $ratio --mixed-precision \
+                                    --save-every 5000 --learning-rate 3e-3 \
+                                    --backbone-type wide28_2 --optimizer adam \
+                                    --weight-decay 0 --warm-up 1
+
+        python ./main/run_ACR.py --gpus 0 --seed ${SVHN_SEEDS[$seed]} \
+                                    --data svhn --server main \
+                                    --n-label-per-class 50 \
+                                    --mismatch-ratio $ratio --mixed-precision \
+                                    --save-every 5000 --learning-rate 3e-3 \
+                                    --backbone-type wide28_2 --optimizer adam \
+                                    --weight-decay 0 --warm-up 1
     done
 done

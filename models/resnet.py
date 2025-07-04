@@ -20,7 +20,6 @@ class GradientReversalLayer(nn.Module):
     def forward(self, x):
         return GradientReversalFunction.apply(x)
 
-
 # Pre-activation ResNet-50 전체 구조
 class ResNet50(nn.Module):
     def __init__(self, num_classes, **kwargs):
@@ -32,6 +31,7 @@ class ResNet50(nn.Module):
         self.output = Deep_Classifier(
             self.backbone.fc.in_features, num_classes, normalize=self.normalize
         )
+        self.in_features = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
 
         self.class_num = num_classes
