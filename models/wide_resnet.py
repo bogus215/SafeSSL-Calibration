@@ -107,7 +107,7 @@ class WRN(nn.Module):
         self.normalize = kwargs.get("normalize", False)
 
         self.output = Deep_Classifier(filters[3], num_classes, normalize=self.normalize)
-
+        self.in_features = filters[3]
         self.class_num = num_classes
 
         for m in self.modules():

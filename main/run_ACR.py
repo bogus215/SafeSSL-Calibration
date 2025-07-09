@@ -14,7 +14,7 @@ from datasets.cifar import CIFAR, load_CIFAR
 from datasets.svhn import ACR, SVHN, load_SVHN
 from datasets.tiny import TinyImageNet, load_tiny
 from datasets.transforms import SemiAugment, TestAugment
-from models import WRN, ResNet50, densenet121, inceptionv4, vgg16_bn
+from models import WRN, ResNet50, ViT
 from tasks.classification_ACR import Classification
 from utils.gpu import set_gpu
 from utils.initialization import initialize_weights
@@ -81,16 +81,14 @@ def main_worker(local_rank: int, config: object):
     # Networks
     if config.backbone_type in ["wide28_10", "wide28_2"]:
         model = WRN(
-            width=int(config.backbone_type.split("_")[-1]), num_classes=num_classes
+            width=int(config.backbone_type.split("_")[-1]),
+            num_classes=num_classes,
+            normalize=config.normalize,
         )
-    elif config.backbone_type == "densenet121":
-        model = densenet121(num_class=num_classes)
-    elif config.backbone_type == "vgg16_bn":
-        model = vgg16_bn(num_class=num_classes)
-    elif config.backbone_type == "inceptionv4":
-        model = inceptionv4(class_nums=num_classes)
     elif config.backbone_type == "resnet50":
-        model = ResNet50(num_classes=num_classes)
+        model = ResNet50(num_classes=num_classes, normalize=config.normalize)
+    elif config.backbone_type == "vit":
+        model = ViT(num_classes=num_classes, normalize=config.normalize)
     else:
         raise NotImplementedError
 
@@ -109,9 +107,8 @@ def main_worker(local_rank: int, config: object):
 
     # Sub-Network Plus
     import torch.nn as nn
-
     setattr(
-        model, "fc1", nn.Linear(model.output.in_features, model.class_num, bias=False)
+        model, "fc1", nn.Linear(model.in_features, model.class_num, bias=False)
     )
     initialize_weights(model)
 
@@ -131,6 +128,7 @@ def main_worker(local_rank: int, config: object):
             seed=config.seed,
             n_label_per_class=config.n_label_per_class,
             mismatch_ratio=config.mismatch_ratio,
+            input_size=config.input_size,
             logger=logger,
         )
 

@@ -1,0 +1,14 @@
+--gpus=0
+--seed=1
+--data=cifar100
+--server=main
+--mismatch-ratio=0.60
+--mixed-precision
+--save-every=5000
+--learning-rate=3e-3
+--backbone-type=wide28_2
+--optimizer=adam
+--weight-decay=0
+--warm-up=1
+--n-label-per-class=100
+--n-valid-per-class=50

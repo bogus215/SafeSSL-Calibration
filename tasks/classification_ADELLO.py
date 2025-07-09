@@ -1,5 +1,4 @@
 import collections
-import math
 import os
 
 import numpy as np
@@ -17,6 +16,142 @@ from utils.logging import make_epoch_description
 class Classification(Task):
     def __init__(self, backbone: nn.Module):
         super(Classification, self).__init__(backbone)
+
+    def log_unlabeled_data(self, unlabel_loader, current_epoch):
+
+        self._set_learning_phase(train=False)
+
+        with torch.no_grad():
+            with Progress(transient=True, auto_refresh=False) as pg:
+                if self.local_rank == 0:
+                    task = pg.add_task(
+                        f"[bold red] Extracting...", total=len(unlabel_loader)
+                    )
+                for batch_idx, data in enumerate(unlabel_loader):
+
+                    x = data["weak_img"].cuda(self.local_rank)
+                    y = data["y"].cuda(self.local_rank)
+
+                    logits = self.predict(x)
+                    probs = nn.functional.softmax(logits, 1)
+                    select_idx = logits.softmax(1).max(1)[0] > 0.95
+                    gt_idx = y < self.backbone.class_num
+
+                    if batch_idx == 0:
+                        select_all = select_idx
+                        gt_all = gt_idx
+                        probs_all, logits_all = probs, logits
+                        labels_all = y
+                    else:
+                        select_all = torch.cat([select_all, select_idx], 0)
+                        gt_all = torch.cat([gt_all, gt_idx], 0)
+                        probs_all, logits_all = torch.cat(
+                            [probs_all, probs], 0
+                        ), torch.cat([logits_all, logits], 0)
+                        labels_all = torch.cat([labels_all, y], 0)
+
+                    if self.local_rank == 0:
+                        desc = f"[bold pink] Extracting .... [{batch_idx+1}/{len(unlabel_loader)}] "
+                        pg.update(task, advance=1.0, description=desc)
+                        pg.refresh()
+
+        select_accuracy = accuracy_score(
+            gt_all.cpu().numpy(), select_all.cpu().numpy()
+        )  # positive : inlier, negative : out of distribution
+        select_precision = precision_score(
+            gt_all.cpu().numpy(), select_all.cpu().numpy()
+        )
+        select_recall = recall_score(gt_all.cpu().numpy(), select_all.cpu().numpy())
+
+        selected_idx = torch.arange(0, len(select_all), device=self.local_rank)[
+            select_all
+        ]
+
+        # Write TensorBoard summary
+        if self.writer is not None:
+            self.writer.add_scalar(
+                "Selected ratio",
+                len(selected_idx) / len(select_all),
+                global_step=current_epoch,
+            )
+            self.writer.add_scalar(
+                "Selected accuracy", select_accuracy, global_step=current_epoch
+            )
+            self.writer.add_scalar(
+                "Selected precision", select_precision, global_step=current_epoch
+            )
+            self.writer.add_scalar(
+                "Selected recall", select_recall, global_step=current_epoch
+            )
+            self.writer.add_scalar(
+                "In distribution: ECE",
+                self.get_ece(
+                    probs_all[gt_all].cpu().numpy(), labels_all[gt_all].cpu().numpy()
+                )[0].item(),
+                global_step=current_epoch,
+            )
+            self.writer.add_scalar(
+                "In distribution: ACC",
+                TopKAccuracy(k=1)(logits_all[gt_all], labels_all[gt_all]).item(),
+                global_step=current_epoch,
+            )
+
+            if ((gt_all) & (probs_all.max(1)[0] >= 0.95)).sum() > 0:
+                self.writer.add_scalar(
+                    "In distribution over conf 0.95: ECE",
+                    self.get_ece(
+                        probs_all[(gt_all) & (probs_all.max(1)[0] >= 0.95)]
+                        .cpu()
+                        .numpy(),
+                        labels_all[(gt_all) & (probs_all.max(1)[0] >= 0.95)]
+                        .cpu()
+                        .numpy(),
+                    )[0].item(),
+                    global_step=current_epoch,
+                )
+                self.writer.add_scalar(
+                    "In distribution over conf 0.95: ACC",
+                    TopKAccuracy(k=1)(
+                        logits_all[(gt_all) & (probs_all.max(1)[0] >= 0.95)],
+                        labels_all[(gt_all) & (probs_all.max(1)[0] >= 0.95)],
+                    ).item(),
+                    global_step=current_epoch,
+                )
+                self.writer.add_scalar(
+                    "Selected ratio of i.d over conf 0.95",
+                    (((gt_all) & (probs_all.max(1)[0] >= 0.95)).sum() / gt_all.sum()).item(),
+                    global_step=current_epoch,
+                )
+
+            if (probs_all.max(1)[0] >= 0.95).sum() > 0:
+                self.writer.add_scalar(
+                    "Seen-class ratio over conf 0.95",
+                    ((labels_all[(probs_all.max(1)[0] >= 0.95)]< self.backbone.class_num).sum()/(probs_all.max(1)[0] >= 0.95).sum()).item()
+                    ,
+                    global_step=current_epoch,
+                )
+                self.writer.add_scalar(
+                    "Unseen-class ratio over conf 0.95",
+                    ((labels_all[(probs_all.max(1)[0] >= 0.95)]>= self.backbone.class_num).sum()/(probs_all.max(1)[0] >= 0.95).sum()).item(),
+                    global_step=current_epoch,
+                )
+
+                self.writer.add_scalar(
+                    "Seen-class over conf 0.95",
+                    (
+                        labels_all[(probs_all.max(1)[0] >= 0.95)]
+                        < self.backbone.class_num
+                    ).sum().item(),
+                    global_step=current_epoch,
+                )
+                self.writer.add_scalar(
+                    "Unseen-class over conf 0.95",
+                    (
+                        labels_all[(probs_all.max(1)[0] >= 0.95)]
+                        >= self.backbone.class_num
+                    ).sum().item(),
+                    global_step=current_epoch,
+                )
 
     def run(
         self,
@@ -66,6 +201,23 @@ class Classification(Task):
         )
         train_u_iterator = iter(train_u_loader)
 
+        label_loader = DataLoader(
+            train_set[0],
+            batch_size=128,
+            shuffle=False,
+            num_workers=num_workers,
+            drop_last=False,
+            pin_memory=False,
+        )
+        unlabel_loader = DataLoader(
+            train_set[1],
+            batch_size=128,
+            shuffle=False,
+            num_workers=num_workers,
+            drop_last=False,
+            pin_memory=False,
+        )
+
         eval_loader = DataLoader(
             eval_set,
             batch_size=128,
@@ -101,24 +253,10 @@ class Classification(Task):
         self.alpha_from_epoch = False
 
         self.p_data, num_samples_lb = self.compute_labeled_prior(
-            DataLoader(
-                train_set[0],
-                batch_size=128,
-                shuffle=False,
-                num_workers=num_workers,
-                drop_last=False,
-                pin_memory=False,
-            )
+            label_loader
         )
         self.gt_u_prior, num_samples_ulb = self.compute_unlabeled_prior(
-            DataLoader(
-                train_set[1],
-                batch_size=128,
-                shuffle=False,
-                num_workers=num_workers,
-                drop_last=False,
-                pin_memory=False,
-            )
+            unlabel_loader
         )
 
         p_target = None  # ignored
@@ -148,6 +286,9 @@ class Classification(Task):
             num_samples_ulb=num_samples_ulb,
         )
         for epoch in range(1, epochs + 1):
+
+            # training unlabeled data logging
+            self.log_unlabeled_data(unlabel_loader=unlabel_loader, current_epoch=epoch)
 
             # Train & evaluate
             train_history, train_l_iterator, train_u_iterator = self.train(
