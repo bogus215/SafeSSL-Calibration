@@ -369,13 +369,13 @@ class Classification(Task):
                         )
 
                         for_one_hot_label = nn.functional.one_hot(
-                            label_y, num_classes=self.backbone.output.out_features
+                            label_y, num_classes=self.backbone.class_num
                         )
                         for_smoothoed_target_label = label_confidence_surgery.view(
                             -1, 1
                         ) * (for_one_hot_label == 1) + (
                             (1 - label_confidence_surgery)
-                            / (self.backbone.output.out_features - 1)
+                            / (self.backbone.class_num - 1)
                         ).view(
                             -1, 1
                         ) * (
@@ -1879,13 +1879,13 @@ class ImageNetClassification(Classification):
                         )
 
                         for_one_hot_label = nn.functional.one_hot(
-                            label_y, num_classes=self.backbone.output.out_features
+                            label_y, num_classes=self.backbone.class_num
                         )
                         for_smoothoed_target_label = label_confidence_surgery.view(
                             -1, 1
                         ) * (for_one_hot_label == 1) + (
                             (1 - label_confidence_surgery)
-                            / (self.backbone.output.out_features - 1)
+                            / (self.backbone.class_num - 1)
                         ).view(
                             -1, 1
                         ) * (

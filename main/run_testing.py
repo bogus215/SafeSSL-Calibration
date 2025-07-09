@@ -16,7 +16,7 @@ from datasets.imagenet import load_imagenet
 from datasets.svhn import SVHN, load_SVHN
 from datasets.tiny import TinyImageNet, load_tiny
 from datasets.transforms import SemiAugment, TestAugment
-from models import WRN, ResNet50, densenet121, inceptionv4, vgg16_bn
+from models import WRN, ResNet50, ViT
 from tasks.testing import Testing
 from utils.gpu import set_gpu
 from utils.logging import get_rich_logger
@@ -87,6 +87,8 @@ def main_worker(local_rank: int, config: object):
         )
     elif config.backbone_type == "resnet50":
         model = ResNet50(num_classes=num_classes, normalize=config.normalize)
+    elif config.backbone_type == "vit":
+        model = ViT(num_classes=num_classes, normalize=config.normalize)
     else:
         raise NotImplementedError
 
@@ -108,55 +110,55 @@ def main_worker(local_rank: int, config: object):
         setattr(
             model,
             "ova_classifiers",
-            nn.Linear(model.output.in_features, int(model.class_num * 2), bias=False),
+            nn.Linear(model.in_features, int(model.class_num * 2), bias=False),
         )
     elif config.for_what == "IOMATCH":
         setattr(
             model,
             "mlp_proj",
             nn.Sequential(
-                nn.Linear(model.output.in_features, model.output.in_features),
+                nn.Linear(model.in_features, model.in_features),
                 nn.ReLU(),
-                nn.Linear(model.output.in_features, model.output.in_features),
+                nn.Linear(model.in_features, model.in_features),
             ),
         )
         setattr(
             model,
             "mb_classifiers",
-            nn.Linear(model.output.in_features, int(model.class_num * 2)),
+            nn.Linear(model.in_features, int(model.class_num * 2)),
         )
         setattr(
             model,
             "openset_classifier",
-            nn.Linear(model.output.in_features, int(model.class_num + 1)),
+            nn.Linear(model.in_features, int(model.class_num + 1)),
         )
     elif "OPENMATCH" in config.for_what:
         setattr(
             model,
             "ova_classifiers",
-            nn.Linear(model.output.in_features, int(model.class_num * 2), bias=False),
+            nn.Linear(model.in_features, int(model.class_num * 2), bias=False),
         )
     elif config.for_what == "MTC":
-        setattr(model, "domain_classifier", nn.Linear(model.output.in_features, 1))
+        setattr(model, "domain_classifier", nn.Linear(model.in_features, 1))
     elif config.for_what in ["Ablation1", "Ablation4"]:
         setattr(model, "ova_cali_scaler", nn.Parameter(torch.ones(1) * 1.5))
         setattr(
             model,
             "ova_classifiers",
-            nn.Linear(model.output.in_features, int(model.class_num * 2), bias=False),
+            nn.Linear(model.in_features, int(model.class_num * 2), bias=False),
         )
     elif config.for_what in ["Ablation2", "Ablation5"]:
         setattr(model, "cali_scaler", nn.Parameter(torch.ones(1) * 1.5))
         setattr(
             model,
             "ova_classifiers",
-            nn.Linear(model.output.in_features, int(model.class_num * 2), bias=False),
+            nn.Linear(model.in_features, int(model.class_num * 2), bias=False),
         )
     elif config.for_what == "Ablation3":
         setattr(
             model,
             "ova_classifiers",
-            nn.Linear(model.output.in_features, int(model.class_num * 2), bias=False),
+            nn.Linear(model.in_features, int(model.class_num * 2), bias=False),
         )
     else:
         pass
@@ -170,6 +172,7 @@ def main_worker(local_rank: int, config: object):
             seed=config.seed,
             n_label_per_class=config.n_label_per_class,
             mismatch_ratio=config.mismatch_ratio,
+            input_size=config.input_size,
             logger=logger,
         )
         open_test_set = CIFAR(
