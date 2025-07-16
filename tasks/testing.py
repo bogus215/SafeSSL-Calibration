@@ -115,10 +115,12 @@ class Testing(Task):
             eval_history = self.iomatch_evaluate(open_test_loader)
         elif "OPENMATCH" in for_what:
             eval_history = self.openmatch_evaluate(open_test_loader, ova_pi)
-        elif for_what in ["FIXMATCH", "SL"]:
+        elif for_what in ["FIXMATCH", "SL", "Adello"]:
             eval_history = self.fixmatch_evaluate(open_test_loader)
         elif for_what == "MTC":
             eval_history = self.mtc_evaluate(open_test_loader)
+        elif for_what == "SCOMATCH":
+            eval_history = self.scomatch_evaluate(open_test_loader)
         else:
             pass
 
@@ -1633,6 +1635,87 @@ class Testing(Task):
             preds=logits[(labels < logits.size(1)) & (in_pred)].softmax(dim=1).numpy(),
             targets=labels[(labels < logits.size(1)) & (in_pred)].numpy(),
             plot_title="_ood_score_under_05",
+        )
+
+        return {k: v.mean().item() for k, v in result.items()}
+
+    @torch.no_grad()
+    def scomatch_evaluate(self, data_loader, **kwargs):
+        """Evaluation defined for a single epoch."""
+
+        steps = len(data_loader)
+        self._set_learning_phase(train=False)
+        result = {
+            "top@1": torch.zeros(1, device=self.local_rank),
+            "ECE": np.zeros(1),
+            "AUROC": np.zeros(1),
+            "F1-IN": np.zeros(1),
+            "F1-OOD": np.zeros(1),
+            "In distribution over conf 0.95: ECE": np.zeros(1),
+        }
+
+        labels, logits, out_scores = [], [], []
+
+        with Progress(transient=True, auto_refresh=False) as pg:
+
+            if self.local_rank == 0:
+                task = pg.add_task(f"[bold red] Data Testing...", total=steps)
+
+            for i, batch in enumerate(data_loader):
+
+                x = batch["x"].to(self.local_rank)
+                y = batch["y"].to(self.local_rank)
+
+                _, feat = self.backbone(x, return_feature=True)
+                full_logit = self.backbone.pos_head(feat)
+                logit = full_logit[:, : self.backbone.class_num]
+
+                pseudo_label_open = torch.softmax(full_logit, dim=-1)
+                out_score = torch.max(pseudo_label_open[:, : self.backbone.class_num], dim=-1)[0] # low --> OOD / high --> ID
+
+                labels.append(y.cpu())
+                logits.append(logit.cpu())
+                out_scores.append(out_score)
+
+                if self.local_rank == 0:
+                    desc = f"[bold pink] [{i+1}/{steps}] |"
+                    pg.update(task, advance=1.0, description=desc)
+                    pg.refresh()
+
+        labels, logits, out_scores = (
+            torch.cat(labels, axis=0),
+            torch.cat(logits, axis=0),
+            torch.cat(out_scores, axis=0),
+        )
+
+        in_label = torch.where(labels < logits.size(1), 1, 0)
+        ood_label = torch.where(labels >= logits.size(1), 1, 0)
+
+        in_pred = (out_scores > 0.5).cpu()
+        ood_pred = (out_scores <= 0.5).cpu()
+
+        result["top@1"][0] = TopKAccuracy(k=1)(
+            logits[labels < logits.size(1)], labels[labels < logits.size(1)]
+        )
+        result["ECE"][0] = self.get_ece(
+            preds=logits[labels < logits.size(1)].softmax(dim=1).numpy(),
+            targets=labels[labels < logits.size(1)].numpy(),
+        )
+        result["AUROC"][0] = roc_auc_score(
+            y_true=ood_label.cpu(), y_score=out_scores.cpu()
+        )
+        result["F1-IN"][0] = f1_score(y_true=in_label, y_pred=in_pred)
+        result["F1-OOD"][0] = f1_score(y_true=ood_label, y_pred=ood_pred)
+        result["In distribution over conf 0.95: ECE"] = self.get_ece(
+            preds=logits[
+                (labels < logits.size(1)) & (logits.softmax(1).max(1)[0] >= 0.95)
+            ]
+            .softmax(dim=1)
+            .numpy(),
+            targets=labels[
+                (labels < logits.size(1)) & (logits.softmax(1).max(1)[0] >= 0.95)
+            ].numpy(),
+            plot_title="_conf_over_95",
         )
 
         return {k: v.mean().item() for k, v in result.items()}

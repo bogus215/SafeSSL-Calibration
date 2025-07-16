@@ -16,7 +16,7 @@ from datasets.imagenet import load_imagenet
 from datasets.svhn import SVHN, load_SVHN
 from datasets.tiny import TinyImageNet, load_tiny
 from datasets.transforms import SemiAugment, TestAugment
-from models import WRN, ResNet50, ViT
+from models import WRN, ResNet50, ViT, densenet121
 from tasks.testing import Testing
 from utils.gpu import set_gpu
 from utils.logging import get_rich_logger
@@ -89,6 +89,8 @@ def main_worker(local_rank: int, config: object):
         model = ResNet50(num_classes=num_classes, normalize=config.normalize)
     elif config.backbone_type == "vit":
         model = ViT(num_classes=num_classes, normalize=config.normalize)
+    elif config.backbone_type == "densenet121":
+        model = densenet121(num_class=num_classes, normalize=config.normalize)
     else:
         raise NotImplementedError
 
@@ -159,6 +161,17 @@ def main_worker(local_rank: int, config: object):
             model,
             "ova_classifiers",
             nn.Linear(model.in_features, int(model.class_num * 2), bias=False),
+        )
+    elif config.for_what =="SCOMATCH":
+        setattr(
+            model,
+            "pos_head",
+            nn.Linear(model.in_features, int(model.class_num + 1), bias=False),
+        )
+        setattr(
+            model,
+            "neg_head",
+            nn.Linear(model.in_features, int(model.class_num + 1), bias=False),
         )
     else:
         pass

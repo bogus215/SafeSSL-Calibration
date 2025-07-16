@@ -1,0 +1,10 @@
+--gpus=0
+--seed=2
+--data=cifar10
+--server=main
+--n-label-per-class=400
+--n-valid-per-class=500
+--mismatch-ratio=0.60
+--backbone-type=wide28_2
+--checkpoint-hash=2025-05-09_13-33-33
+--for-what=SCOMATCH
