@@ -65,8 +65,10 @@ class Transition(nn.Module):
 # B stands for bottleneck layer(BN-RELU-CONV(1x1)-BN-RELU-CONV(3x3))
 # C stands for compression factor(0<=theta<=1)
 class DenseNet(nn.Module):
-    def __init__(self, block, nblocks, num_class, growth_rate=12, reduction=0.5):
+    def __init__(self, block, nblocks, num_class, growth_rate=12, reduction=0.5, **kwargs):
         super().__init__()
+
+        self.normalize = kwargs.get("normalize", False)
         self.growth_rate = growth_rate
 
         # """Before entering the first dense block, a convolution
@@ -111,22 +113,51 @@ class DenseNet(nn.Module):
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
-        self.linear = nn.Linear(inner_channels, num_class)
+        self.class_num = num_class
+        self.in_features = inner_channels
+        self.output = Deep_Classifier(inner_channels, self.class_num, normalize=self.normalize)
 
-    def forward(self, x):
-        output = self.conv1(x)
-        output = self.features(output)
-        output = self.avgpool(output)
-        output = output.view(output.size()[0], -1)
-        output = self.linear(output)
-        return output
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                if not self.normalize:
+                    nn.init.constant_(m.bias, 0)
 
-    def scaling_logits(self, logits):
+    def forward(self, x, return_feature=False, reverse=False):
+        x = self.conv1(x)
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = x.view(x.size()[0], -1)
+
+        return self.output(
+            x, return_feature=return_feature, reverse=reverse
+        )
+
+    def get_only_feat(self, x):
+
+        x = self.conv1(x)
+        x = self.features(x)
+        x = self.avgpool(x)
+        feature = x.view(x.size()[0], -1)
+
+        if self.normalize:
+            feature = nn.functional.normalize(feature)
+
+        return feature
+
+    def scaling_logits(self, logits, name="cali_scaler"):
 
         # Expand temperature to match the size of logits
-        temperature = self.temperature.unsqueeze(1).expand(
-            logits.size(0), logits.size(1)
+        temperature = (
+            getattr(self, name).unsqueeze(1).expand(logits.size(0), logits.size(1))
         )
+        temperature = torch.clip(temperature, max=5, min=0.2)
+
         return logits / (torch.abs(temperature) + 1e-5)
 
     def _make_dense_layers(self, block, in_channels, nblocks):
@@ -140,8 +171,8 @@ class DenseNet(nn.Module):
         return dense_block
 
 
-def densenet121(num_class):
-    return DenseNet(Bottleneck, [6, 12, 24, 16], growth_rate=32, num_class=num_class)
+def densenet121(num_class, normalize):
+    return DenseNet(Bottleneck, [6, 12, 24, 16], growth_rate=32, num_class=num_class, normalize=normalize)
 
 
 def densenet169(num_class):
@@ -154,3 +185,55 @@ def densenet201(num_class):
 
 def densenet161(num_class):
     return DenseNet(Bottleneck, [6, 12, 36, 24], growth_rate=48, num_class=num_class)
+
+import torch
+import torch.nn as nn
+from torch.autograd import Function
+
+
+class GradientReversalFunction(Function):
+    def forward(self, x):
+        return x.view_as(x)
+
+    def backward(self, grad_output):
+        output = grad_output.neg()
+        return output
+
+
+class GradientReversalLayer(nn.Module):
+    def __init__(self):
+        super(GradientReversalLayer, self).__init__()
+
+    def forward(self, x):
+        return GradientReversalFunction.apply(x)
+
+class Deep_Classifier(nn.Module):
+    def __init__(self, in_node, out_node, normalize):
+        super().__init__()
+
+        if normalize:
+            self.linear = nn.Linear(in_node, out_node, bias=False)
+        else:
+            self.linear = nn.Linear(in_node, out_node)
+
+        self.reversal = GradientReversalLayer()
+
+        self.in_features = in_node
+        self.out_features = out_node
+
+        self.normalize = normalize
+
+    def forward(self, feature, reverse=False, return_feature=False):
+
+        if self.normalize:
+            feature = nn.functional.normalize(feature)
+
+        if reverse:
+            feature = self.reversal(feature)
+
+        logits = self.linear(feature)
+
+        if return_feature:
+            return logits, feature
+        else:
+            return logits

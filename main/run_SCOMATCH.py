@@ -15,8 +15,8 @@ from datasets.imagenet import load_imagenet
 from datasets.svhn import SVHN, Selcted_DATA, load_SVHN
 from datasets.tiny import TinyImageNet, load_tiny
 from datasets.transforms import SemiAugment, TestAugment
-from models import WRN, ResNet50, densenet121, inceptionv4, vgg16_bn
-from tasks.classification_SCOMATCH import Classification, TinyClassification
+from models import WRN, ResNet50, ViT
+from tasks.classification_SCOMATCH import Classification
 from utils.gpu import set_gpu
 from utils.initialization import initialize_weights
 from utils.logging import get_rich_logger
@@ -82,16 +82,14 @@ def main_worker(local_rank: int, config: object):
     # Networks
     if config.backbone_type in ["wide28_10", "wide28_2"]:
         model = WRN(
-            width=int(config.backbone_type.split("_")[-1]), num_classes=num_classes
+            width=int(config.backbone_type.split("_")[-1]),
+            num_classes=num_classes,
+            normalize=config.normalize,
         )
-    elif config.backbone_type == "densenet121":
-        model = densenet121(num_class=num_classes)
-    elif config.backbone_type == "vgg16_bn":
-        model = vgg16_bn(num_class=num_classes)
-    elif config.backbone_type == "inceptionv4":
-        model = inceptionv4(class_nums=num_classes)
     elif config.backbone_type == "resnet50":
-        model = ResNet50(num_classes=num_classes)
+        model = ResNet50(num_classes=num_classes, normalize=config.normalize)
+    elif config.backbone_type == "vit":
+        model = ViT(num_classes=num_classes, normalize=config.normalize)
     else:
         raise NotImplementedError
 
@@ -110,16 +108,15 @@ def main_worker(local_rank: int, config: object):
 
     # Sub-Network Plus
     import torch.nn as nn
-
     setattr(
         model,
         "pos_head",
-        nn.Linear(model.output.in_features, int(model.class_num + 1), bias=False),
+        nn.Linear(model.in_features, int(model.class_num + 1), bias=False),
     )
     setattr(
         model,
         "neg_head",
-        nn.Linear(model.output.in_features, int(model.class_num + 1), bias=False),
+        nn.Linear(model.in_features, int(model.class_num + 1), bias=False),
     )
 
     initialize_weights(model)
@@ -140,6 +137,7 @@ def main_worker(local_rank: int, config: object):
             seed=config.seed,
             n_label_per_class=config.n_label_per_class,
             mismatch_ratio=config.mismatch_ratio,
+            input_size=config.input_size,
             logger=logger,
         )
 
@@ -293,13 +291,11 @@ def main_worker(local_rank: int, config: object):
         logger.info(f"Checkpoint directory: {config.checkpoint_dir}")
 
     # Model (Task)
-    if config.data in ["cifar10", "cifar100", "svhn"]:
-        model = Classification(backbone=model)
-    elif config.data in ["imagenet"]:
-        model = ImageNetClassification(backbone=model)
-    elif config.data in ["tiny"]:
-        model = TinyClassification(backbone=model)
-
+    model = (
+        Classification(backbone=model)
+        if config.data != "imagenet"
+        else ImageNetClassification(backbone=model)
+    )
     model.prepare(
         ckpt_dir=config.checkpoint_dir,
         optimizer=config.optimizer,

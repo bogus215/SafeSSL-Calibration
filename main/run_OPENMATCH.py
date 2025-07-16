@@ -16,7 +16,7 @@ from datasets.imagenet import load_imagenet
 from datasets.svhn import SVHN, Selcted_DATA, load_SVHN
 from datasets.tiny import TinyImageNet, load_tiny
 from datasets.transforms import SemiAugment, TestAugment
-from models import WRN, ResNet50, ViT
+from models import WRN, ResNet50, ViT, densenet121
 from tasks.classification_OPENMATCH import Classification
 from utils.gpu import set_gpu
 from utils.logging import get_rich_logger
@@ -90,6 +90,8 @@ def main_worker(local_rank: int, config: object):
         model = ResNet50(num_classes=num_classes, normalize=config.normalize)
     elif config.backbone_type == "vit":
         model = ViT(num_classes=num_classes, normalize=config.normalize)
+    elif config.backbone_type == "densenet121":
+        model = densenet121(num_class=num_classes, normalize=config.normalize)
     else:
         raise NotImplementedError
 
